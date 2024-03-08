@@ -23,16 +23,19 @@ public class TestCallTask : MonoBehaviour
             switch (pressState)
             {
                 case PressState.Small:
+                    Debug.Log("Force level: small");
 #if !UNITY_EDITOR
             hololensClient.SendForceDetectedMessage(HoloLensClient.forceLevel.small);
 #endif
                     break;
                 case PressState.Medium:
+                    Debug.Log("Force level: medium");
 #if !UNITY_EDITOR
             hololensClient.SendForceDetectedMessage(HoloLensClient.forceLevel.medium);
 #endif
                     break;
                 case PressState.Large:
+                    Debug.Log("Force level: large");
 #if !UNITY_EDITOR
             hololensClient.SendForceDetectedMessage(HoloLensClient.forceLevel.large);
 #endif

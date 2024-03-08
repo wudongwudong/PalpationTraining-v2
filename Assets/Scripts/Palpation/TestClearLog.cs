@@ -9,7 +9,7 @@ public class TestClearLog : MonoBehaviour
 
     void OnTriggerEnter(Collider col)
     {
-        if (col.name == "L_Palm")
+        if (col.name == "_PalmCollider")
         {
             holoClient.debugLog = "";
         }
