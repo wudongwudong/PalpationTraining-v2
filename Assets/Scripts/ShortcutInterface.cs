@@ -13,7 +13,7 @@ public class ShortcutInterface : MonoBehaviour
     public Interactable toggleLeft, toggleRight;
     public List<string> controlledHandsList = new List<string>();
     public Interactable buttonBT, buttonPS, buttonEx, buttonDropObject;
-    public Interactable toggleRecord;
+    //public Interactable toggleRecord;
 
     public GameObject handLeft;
     public GameObject handRight;
@@ -34,13 +34,13 @@ public class ShortcutInterface : MonoBehaviour
                 controlledHandsList.Remove("Right");
         });
 
-        toggleRecord.OnClick.AddListener(delegate {
-            if (toggleRecord.IsToggled)
-                gameObject.GetComponent<JointDataLogger>().StartRecord();
-            else
-                gameObject.GetComponent<JointDataLogger>().EndRecord();
+        //toggleRecord.OnClick.AddListener(delegate {
+        //    if (toggleRecord.IsToggled)
+        //        gameObject.GetComponent<JointDataLogger>().StartRecord();
+        //    else
+        //        gameObject.GetComponent<JointDataLogger>().EndRecord();
             
-        });
+        //});
 
         buttonBT.OnClick.AddListener(BTButtonOnClick);
         buttonPS.OnClick.AddListener(PSButtonOnClick);

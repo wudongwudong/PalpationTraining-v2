@@ -7,7 +7,7 @@ from requests.auth import HTTPBasicAuth
 ip = '172.20.10.7' 
 port = 5000
 url = "http://43.163.219.59:8001/beta"
-doctor_name = "Olivia"
+
 
 def generate_role_setting(prompt):
     """
@@ -32,11 +32,11 @@ def generate_role_setting(prompt):
     
 base_prompt = """
 Generate a detailed role setting for a patient with hepatomegaly. The sample format is as below. 
-Change all the settings below and generate a new role.
+Change all the settings below and generate a new role. The gender of the patient must be Male.
 role_settings = {
     "Role Overview": {
         "Name": "Li Ming",
-        "Age": "52 years old",
+        "Age": "52",
         "Gender": "Male",
         "Occupation": "Senior Engineer",
         "Residence": "Urban areas, with a fast pace of life"
@@ -53,10 +53,6 @@ role_settings = {
         "Clothing": "Business casual attire, typically a button-up shirt and dress pants, indicative of his senior engineer role",
         "Skin Color": "Slightly yellowed skin tone, a subtle indication of his liver condition",
         "Additional Details": "Often appears tired, with slight bags under his eyes, reflecting his high work pressure and lack of rest"
-    },
-    "Voice": {
-        "prosody rate" : "medium",
-        "pitch" : "-2%"
     },
     "Visible or Palpable Physical Conditions": {
         "Abdominal swelling": "Noticeable bulge in the upper right abdomen, visible when wearing tight clothing",
@@ -132,92 +128,21 @@ Just keep it in your memory.
 """
 
 
-def define_touch():
-    touch_prompt = """
-    Based on the patient's condition “Visible or Palpable Physical Conditions”, 
-    if a doctor applies pressure of approximately 1-8 Newtons to regions 1-14 
-    of the patient's abdomen, what kind of tactile sensation would the doctor 
-    experience in their hands? Please respond in JSON format below 
-    (list out all the 14 Regions and with all 8 Newtons, return only the JSON):
-    {
-        "Region 1": {
-            "1 Newton": "", "2 Newtons": "", "3 Newtons": "", "4 Newtons": "", 
-            "5 Newtons": "", "6 Newtons": "", "7 Newtons": "", "8 Newtons": ""},
-        "Region 2": {
-            "1 Newton": "", "2 Newtons": "", "3 Newtons": "", "4 Newtons": "", 
-            "5 Newtons": "", "6 Newtons": "", "7 Newtons": "", "8 Newtons": ""},
-        "Region 3": {
-            "1 Newton": "", "2 Newtons": "", "3 Newtons": "", "4 Newtons": "", 
-            "5 Newtons": "", "6 Newtons": "", "7 Newtons": "", "8 Newtons": ""},
-        "Region 4": {
-            "1 Newton": "", "2 Newtons": "", "3 Newtons": "", "4 Newtons": "", 
-            "5 Newtons": "", "6 Newtons": "", "7 Newtons": "", "8 Newtons": ""},
-        "Region 5": {
-           "1 Newton": "", "2 Newtons": "", "3 Newtons": "", "4 Newtons": "", 
-            "5 Newtons": "", "6 Newtons": "", "7 Newtons": "", "8 Newtons": ""},
-        "Region 6": {
-            "1 Newton": "", "2 Newtons": "", "3 Newtons": "", "4 Newtons": "", 
-            "5 Newtons": "", "6 Newtons": "", "7 Newtons": "", "8 Newtons": ""},
-        "Region 7": {
-            "1 Newton": "", "2 Newtons": "", "3 Newtons": "", "4 Newtons": "", 
-            "5 Newtons": "", "6 Newtons": "", "7 Newtons": "", "8 Newtons": ""},
-        "Region 8": {
-            "1 Newton": "", "2 Newtons": "", "3 Newtons": "", "4 Newtons": "", 
-            "5 Newtons": "", "6 Newtons": "", "7 Newtons": "", "8 Newtons": ""},
-        "Region 9": {
-            "1 Newton": "", "2 Newtons": "", "3 Newtons": "", "4 Newtons": "", 
-            "5 Newtons": "", "6 Newtons": "", "7 Newtons": "", "8 Newtons": ""},
-        "Region 10": {
-            "1 Newton": "", "2 Newtons": "", "3 Newtons": "", "4 Newtons": "", 
-            "5 Newtons": "", "6 Newtons": "", "7 Newtons": "", "8 Newtons": ""},
-        "Region 11": {
-            "1 Newton": "", "2 Newtons": "", "3 Newtons": "", "4 Newtons": "", 
-            "5 Newtons": "", "6 Newtons": "", "7 Newtons": "", "8 Newtons": ""},
-        "Region 12": {
-            "1 Newton": "", "2 Newtons": "", "3 Newtons": "", "4 Newtons": "", 
-            "5 Newtons": "", "6 Newtons": "", "7 Newtons": "", "8 Newtons": ""},
-        "Region 13": {
-            "1 Newton": "", "2 Newtons": "", "3 Newtons": "", "4 Newtons": "", 
-            "5 Newtons": "", "6 Newtons": "", "7 Newtons": "", "8 Newtons": ""},
-        "Region 14": {
-            "1 Newton": "", "2 Newtons": "", "3 Newtons": "", "4 Newtons": "", 
-            "5 Newtons": "", "6 Newtons": "", "7 Newtons": "", "8 Newtons": ""},
-    }
-    """
-    """
-    Define touch of a doctor when doing palpation on a patient using GPT-3.
-    """
-    data = {
-        "model": "gpt-3.5-turbo",    ##### 根据自己需要更换 #####
-        "messages": [{"role": "user", "content": touch_prompt}],
-        "max_tokens": 1024,
-    }
-    data = json.dumps(data)
-    try:
-        response = requests.post(url=url, data=data, auth=HTTPBasicAuth(username="thumt", password="Thumt@2023")).text
-        response_dict = json.loads(response)  # 将响应转换为字典
-        if 'choices' in response_dict and response_dict['choices']:
-            response = response_dict['choices'][0]['message']["content"]
-            return response
-        else:
-            return {"error": "No response or invalid format from API"}
-    except requests.RequestException as e:
-        return {"error": f"Network error: {str(e)}"}
-
-
 class Palpation:
     def __init__(self, role_settings):
         self.start_sequence = "\nAI (as Patient):"
         self.restart_sequence = "\nHuman (as Doctor):"
         # 使用格式化字符串来插入实际的值
         formatted_role_settings = json.dumps(role_settings, indent=4)  # 格式化角色设定
-        self.initial_prompt = (
-            f"You are a hepatomegaly patient going for a palpation medical check up. "
-            f"Below is your personal detail:\n\n{formatted_role_settings}\n\n"
-            f"Human (as Doctor): I am your outpatient doctor {doctor_name}. You are coming to the "
-            f"hospital for treatment now. As my patient, you need to answer all the questions "
-            f"I ask you truthfully. Please answer in an easy and short way.\n"
-        )
+        self.initial_prompt = f"""
+            You are a patient going for a palpation medical check up. 
+            Below is your personal detail:\n\n{formatted_role_settings}\n\n"
+            You do not know what disease you are suffering. You are going to the hospital for treatment now. 
+            Please answer in an easy and short way when talking to the doctor. Don't talk too polite and formal.
+            You need to have emotion and personality and talk like a real human, eg. Feel shock and worried when you are told having certain disease.
+            (And also other appropriate emotion such as sad, happy, angry etc.)
+            YOU SHOULD TALK ONLY AS A PATIENT.
+        """
         self.history = [self.initial_prompt]  # 初始历史记录包含初始提示
 
     def chat_with_patient(self, message):
@@ -247,6 +172,8 @@ async def send_data_to_holoLens(data, writer):
     settings_data = json.dumps(data).encode('utf-8')
     writer.write(len(settings_data).to_bytes(4, 'little') + settings_data)
     await writer.drain()
+    print("data sent!")
+    print(settings_data)
 
 async def handle_client():
     role_settings = generate_role_setting(base_prompt)
@@ -255,19 +182,13 @@ async def handle_client():
     chat = Palpation(role_settings)
     role_settings = json.loads(role_settings.replace("role_settings = ",""))
     gender = role_settings["Role Overview"]["Gender"]
-    prosody_rate = role_settings["Voice"]["prosody rate"]
-    pitch = role_settings["Voice"]["pitch"]
     data = {
         'gender': gender,
-        'prosody_rate': prosody_rate,
-        'pitch': pitch
     }
-
     reader, writer = await asyncio.open_connection(ip, port)
     print(f"Connection from {ip} established.")
     
-    #send_data_to_holoLens(data, writer)
-    #touch_json = define_touch()
+    await send_data_to_holoLens(data, writer)
     
     # 使用聊天系统
     try:
@@ -279,7 +200,6 @@ async def handle_client():
             message_length = int.from_bytes(data, 'little')
             message = (await reader.read(message_length)).decode()  # read the actual message
 
-            # message = "FORCE PRESS DETECTED. [small]"
             if message.startswith("FORCE PRESS DETECTED"):
                 print(f"{message}")
                 if "large" in message:

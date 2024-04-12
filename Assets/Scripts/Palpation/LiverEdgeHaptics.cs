@@ -30,6 +30,7 @@ public class LiverEdgeHaptics : MonoBehaviour
     public int curForce = 0;
     private bool isInLiverRegion = false;
     private bool isGrasped = false;
+    public bool isInPainRegion = false;
 
     [SerializeField] private TMP_Text lowerThreshold_Text;
     [SerializeField] private TMP_Text upperThreshold_Text;
@@ -68,8 +69,6 @@ public class LiverEdgeHaptics : MonoBehaviour
 
     private void OnGraspedPatient(HaptGloveHandler.HandType hand, HaptGloveHandler handler)
     {
-        isGrasped = true;
-
         gloveHandler = handler;
 
         if (gloveHandler != null)
@@ -77,8 +76,30 @@ public class LiverEdgeHaptics : MonoBehaviour
             //palpateStartFingerPos = gloveHandler.GetFingerPosition();
             gloveHandler.GetFingerPosition().CopyTo(palpateStartFingerPos, 0);
         }
-        
+
+        isGrasped = true;
     }
+
+    //private void OnGraspedPatient(HaptGloveHandler.HandType hand, HaptGloveHandler handler)
+    //{
+    //    gloveHandler = handler;
+
+    //    StartCoroutine(StopPumpDelayGrasp(gloveHandler));
+    //}
+
+    //IEnumerator StopPumpDelayGrasp(HaptGloveHandler handler)
+    //{
+    //    yield return new WaitForSeconds(0.5f);
+
+    //    if (gloveHandler != null)
+    //    {
+    //        //palpateStartFingerPos = gloveHandler.GetFingerPosition();
+    //        gloveHandler.GetFingerPosition().CopyTo(palpateStartFingerPos, 0);
+    //    }
+
+    //    isGrasped = true;
+    //}
+
     private void OnReleasedPatient(HaptGloveHandler.HandType hand, HaptGloveHandler handler)
     {
         isGrasped = false;
@@ -86,10 +107,10 @@ public class LiverEdgeHaptics : MonoBehaviour
 
     public void OnSliderChanged(SliderEventData eventData)
     {
-        int lowerMin = 1000;
-        int lowerMax = 2000;
-        int UpperMin = 1600;
-        int upperMax = 2600;
+        int lowerMin = 0;
+        int lowerMax = 1000;
+        int UpperMin = 600;
+        int upperMax = 1600;
         int breathMin = 10;
         int breathMax = 20;
 
@@ -119,7 +140,7 @@ public class LiverEdgeHaptics : MonoBehaviour
 
     void OnTriggerEnter(Collider collider)
     {
-        if (collider.name == "R_IndexDistal")
+        if (collider.name == "GhostPalm")
         {
             gloveHandler = collider.GetComponentInParent<HaptGloveHandler>();
             //palpateStartFingerPos = gloveHandler.GetFingerPosition();
@@ -129,13 +150,28 @@ public class LiverEdgeHaptics : MonoBehaviour
         }
     }
 
+    //void OnTriggerEnter(Collider collider)
+    //{
+    //    if (collider.name == "GhostPalm")
+    //    {
+    //        gloveHandler = collider.GetComponentInParent<HaptGloveHandler>();
+    //        //palpateStartFingerPos = gloveHandler.GetFingerPosition();
+    //        gloveHandler.GetFingerPosition().CopyTo(palpateStartFingerPos, 0);
+
+    //        isInLiverRegion = true;
+    //    }
+    //}
+
+    //IEnumerator StopPumpDelay
+
     private void OnTriggerExit(Collider collider)
     {
-        if (collider.name == "R_IndexDistal")
+        if (collider.name == "GhostPalm")
         {
-            StartCoroutine("DelayFunc");
+            //StartCoroutine("DelayFunc");
 
             isInLiverRegion = false;
+            beatOn = false;
 
             if ((curStage>=2) | (curStage <=4)) //pressure applied
             {
@@ -147,7 +183,7 @@ public class LiverEdgeHaptics : MonoBehaviour
             timeFrame = 0;
             liver.transform.localPosition = liverIniPosition;
 
-            logText.text = "Training";
+            logText.text = "";
         }
     }
 
@@ -168,15 +204,19 @@ public class LiverEdgeHaptics : MonoBehaviour
 
     void Update()
     {
-        if (isGrasped)
+        if (gloveHandler!=null)
         {
             int[] airPressure = gloveHandler.GetAirPressure();
-            debugTMP.text = airPressure[1] + ", " + airPressure[2] + ", " + airPressure[3] + ",\n" + palpateCurFingerPos[1] + "\n" + palpateCurFingerPos[2] + "\n" + palpateCurFingerPos[3] + "\n\n" + curForce;
-
+            debugTMP.text = airPressure[1] + ", " + airPressure[2] + ", " + airPressure[3] + ",\n" + palpateCurFingerPos[1] + "\n" + palpateCurFingerPos[2] + "\n" + "\n\n" + curForce;// + palpateCurFingerPos[3]
 
             palpateCurFingerPos = gloveHandler.GetFingerPosition();
 
-            curForce = (palpateCurFingerPos[1] + palpateCurFingerPos[2] + palpateCurFingerPos[3]) - (palpateStartFingerPos[1] + palpateStartFingerPos[2] + palpateStartFingerPos[3]);
+            curForce = (palpateCurFingerPos[1] + palpateCurFingerPos[2]) - (palpateStartFingerPos[1] + palpateStartFingerPos[2]);// + palpateCurFingerPos[3],  + palpateStartFingerPos[3]
+        }
+
+        if (isGrasped)
+        {
+            
 
             if (curForce <= pressingThreshold[0])
             {
@@ -215,8 +255,10 @@ public class LiverEdgeHaptics : MonoBehaviour
                         beatOn = true;
 
                     logText.text = "PressingState: Normal";
+
 #if !UNITY_EDITOR
-                    hololensClient.SendForceDetectedMessage(HoloLensClient.forceLevel.medium);
+                    if (isInPainRegion)
+                        hololensClient.SendForceDetectedMessage(HoloLensClient.forceLevel.medium);
 #endif
                 }
             }
@@ -230,8 +272,10 @@ public class LiverEdgeHaptics : MonoBehaviour
                         beatOn = true;
 
                     logText.text = "PressingState: Hard";
+
 #if !UNITY_EDITOR
-                    hololensClient.SendForceDetectedMessage(HoloLensClient.forceLevel.large);
+                    if (isInPainRegion)
+                        hololensClient.SendForceDetectedMessage(HoloLensClient.forceLevel.large);
 #endif
                 }
             }
@@ -378,10 +422,10 @@ public class LiverEdgeHaptics : MonoBehaviour
         }
     }
 
-    IEnumerator DelayFunc()
-    {
-        gameObject.GetComponent<MeshCollider>().enabled = false;
-        yield return new WaitForSeconds(1f);
-        gameObject.GetComponent<MeshCollider>().enabled = true;
-    }
+    //IEnumerator DelayFunc()
+    //{
+    //    gameObject.GetComponent<MeshCollider>().enabled = false;
+    //    yield return new WaitForSeconds(1f);
+    //    gameObject.GetComponent<MeshCollider>().enabled = true;
+    //}
 }

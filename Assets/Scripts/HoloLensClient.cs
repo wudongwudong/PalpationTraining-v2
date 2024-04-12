@@ -11,6 +11,8 @@ using System.IO;
 using TMPro;
 using Microsoft.CognitiveServices.Speech;
 using UnityEngine.Events;
+using UnityEngine.UI;
+// using System.Text.Json.Serialization;
 #if !UNITY_EDITOR
     using Windows.Networking;
     using Windows.Networking.Sockets;
@@ -26,12 +28,14 @@ using UnityEngine.Events;
 //Able to act as a reciever 
 public class HoloLensClient : MonoBehaviour
 {
+
+    #region Variables
     // UI
     //public TMP_InputField inputField;
     public TextMeshProUGUI displayText;
     public TextMeshProUGUI RecognizedText;
-
     private string recognizedString = "";
+    //public Button saveConversationButton;
     private System.Object threadLocker = new System.Object();
 
     // Microsoft Cognitive Speech Service
@@ -40,27 +44,31 @@ public class HoloLensClient : MonoBehaviour
     [HideInInspector] public string SpeechServiceAPIKey = "890b6fc23e9742eca9f5912f65186a1a";
     [HideInInspector] public string SpeechServiceRegion = "southeastasia";
     private SpeechRecognizer recognizer;
-    string fromLanguage = "en-US";
+    string fromLanguage = "en-US";   //zh-CN
     private bool micPermissionGranted = false;
-    public AudioSource audioSource; 
-    private SemaphoreSlim semaphoreSlim = new SemaphoreSlim(1, 1);
+    public AudioSource audioSource;
+    private AudioClip audioClip;
     private readonly Queue<Action> _executeOnMainThread = new Queue<Action>();
+    private string gender = "Male";
+    public static System.Random random = new System.Random();
+    private string selectedVoiceName = null;
+    public bool isRecognitionPaused = false;
+    private SpeechSynthesizer synthesizer;
+    private bool isSynthesizing = false;
+    private Palpation chat;
 
-#if !UNITY_EDITOR
-    private MediaPlayer mediaPlayer = new MediaPlayer();
-#endif
+    //Save Conversations
+    private string user = "Doctor";
+    private string speaker = "Patient";
+    private string persistentPath;
+    string fileName = "ConvData";
+    public InteractionData interactionData = new InteractionData();
+    private bool isRecording = false;
 
-    // Data
-    private string gender;
-    private string prosody_rate;
-    private string pitch;
-
-#if !UNITY_EDITOR
-        StreamSocket socket;
-        StreamSocketListener listener;
-        String port = "5000";
-        private DataWriter sharedDataWriter;       
-#endif
+    #if !UNITY_EDITOR  
+    private MediaPlayer mediaPlayer = new MediaPlayer(); 
+        
+    #endif
 
     //Unity events
     public UnityAction<string> onSpeechReconized;
@@ -70,83 +78,175 @@ public class HoloLensClient : MonoBehaviour
     public TextMeshProUGUI debugLogText;
     [HideInInspector] public string debugLog;
 
+    #endregion
+
+    //void Awake()
+    //{
+    //    persistentPath = Application.persistentDataPath;
+    //    audioSource = GetComponent<AudioSource>();
+    //    if (audioSource == null) {
+    //        UnityEngine.Debug.LogError("No AudioSource component found on this GameObject.");
+    //    }
+    //    else{
+    //        audioSource.playOnAwake = false;
+    //    }
+    //}
 
     // Use this for initialization
-    void Start()
+    async void Start()
     {
+        persistentPath = Application.persistentDataPath;
+
         UnityEngine.Debug.Log("Start");
         debugLog += "\n" + "start";
+
+        try
+        {
+            await HoloLensClient.GPTInilization(this);
+        }
+        catch (Exception e)
+        {
+            debugLog += e.ToString();
+        }
+        
+        debugLog += "\n" + "Role settings generate.";
         micPermissionGranted = true;
         StartContinuous();
-    #if !UNITY_EDITOR
-        InitializeTCPListener();  // Initialize and start the TCP listener
-        StartCoroutine(InitializeMediaCapture());
-        //RunPythonScript();
-    #endif
-    }
 
+        ChooseVoiceNameAndVocalizeMessage();
 
+        var config = SpeechConfig.FromSubscription(SpeechServiceAPIKey, SpeechServiceRegion);
+        config.SpeechSynthesisLanguage = fromLanguage;  // 设置语言
+        config.SpeechSynthesisVoiceName = selectedVoiceName;
+        synthesizer = new SpeechSynthesizer(config);
+
+        // saveConversationButton.onClick.AddListener(HandleSaveConversationButtonClick);
 #if !UNITY_EDITOR
-    private void RunPythonScript(){
-        ProcessStartInfo startInfo = new ProcessStartInfo();
-        startInfo.FileName = Application.dataPath + "/Scripts/runPythonScript.bat";
-        startInfo.CreateNoWindow = true;
-        startInfo.UseShellExecute = false;
-        Process process = new Process();
-        process.StartInfo = startInfo;
-        process.Start();
+        StartCoroutine(InitializeMediaCapture());
+#endif
     }
+
+    public async void ReconnectGPT()
+    {
+        try
+        {
+            debugLog += "\n Reconnect GPT";
+            await HoloLensClient.GPTInilization(this);
+        }
+        catch (Exception e)
+        {
+            debugLog += "\n" + e.ToString();
+        }
+
+        debugLog += "\n" + "Role settings generate.";
+        micPermissionGranted = true;
+        StartContinuous();
+        // saveConversationButton.onClick.AddListener(HandleSaveConversationButtonClick);
+#if !UNITY_EDITOR
+        StartCoroutine(InitializeMediaCapture());
+#endif
+    }
+
+    #region GPT Initialization
+    public static async Task GPTInilization(HoloLensClient instance)
+    {
+        PatientRoleGenerator patient = new PatientRoleGenerator();
+        string patientRole = await patient.GenerateRoleSettingAsync();
+        patientRole = patientRole.Replace("role_settings = ", "");
+        UnityEngine.Debug.Log(patientRole);
+        instance.chat = new Palpation(patientRole);
+    }
+    #endregion
 
     #region Receive Data and Vocalize
-    private async Task ReceiveSettings(DataReader dr)
+    private void ChooseVoiceNameAndVocalizeMessage()
     {
-debugLog += "\n" + "ReceiveSettings 1";
-        await dr.LoadAsync(sizeof(uint));
-        uint messageLength = dr.ReadUInt32();
-        await dr.LoadAsync(messageLength);
-        string settingsJson = dr.ReadString(messageLength);
-        var settings = JsonUtility.FromJson<Settings>(settingsJson);
-debugLog += "\n" + "ReceiveSettings 2";
-
-        this.gender = settings.gender;
-        this.prosody_rate = settings.prosody_rate;
-        this.pitch = settings.pitch;
-
-        UnityEngine.Debug.Log(settings.gender);
-debugLog += "\n" + settings.gender;
-
-    }
-    private class Settings
-    {
-        public string gender;
-        public string prosody_rate;
-        public string pitch;
-    }
-    private async void VocalizeMessage2(string message){
         var config = SpeechConfig.FromSubscription(SpeechServiceAPIKey, SpeechServiceRegion);
-        config.SpeechSynthesisLanguage = "en-US";  // Set the language
- 
-        // Set the voice name
-        if (gender == "Male")
-        {
-            config.SpeechSynthesisVoiceName = "en-US-GuyNeural"; // Choose a male voice
-        }
-        else if (gender == "Female")
-        {
-            config.SpeechSynthesisVoiceName = "en-US-Jessa24kRUS"; // Choose a female voice
-        }
-        else
-        {
-            config.SpeechSynthesisVoiceName = "en-US-Jessa24kRUS"; // Default choice
-        }
+        config.SpeechSynthesisLanguage = fromLanguage;
 
-        using (var synthesizer = new SpeechSynthesizer(config))
+        switch (fromLanguage)
+        {
+            case "en-US":
+                if (gender == "Male")
+                {
+                    string[] maleVoices = new string[]
+                    {
+                        "en-US-GuyNeural",
+                        "en-US-DavisNeural",
+                        "en-US-ChristopherNeural",
+                        "en-US-BrianNeural",
+                        "en-US-AndrewNeural",
+                        "en-GB-RyanNeural",
+                        "en-AU-WilliamNeural",
+                        "en-CA-LiamNeural"
+                    };
+                    selectedVoiceName = maleVoices[random.Next(maleVoices.Length)];
+                }
+                else
+                {
+                    string[] femaleVoices = new string[]
+                    {
+                        "en-US-JessaNeural",
+                        "en-US-JaneNeural",
+                        "en-US-EmmaNeural",
+                        "en-US-AvaNeural",
+                        "en-US-AriaNeural",
+                        "en-US-SaraNeural",
+                        "en-GB-MiaNeural",
+                        "en-GB-LibbyNeural"
+                    };
+                    selectedVoiceName = femaleVoices[random.Next(femaleVoices.Length)];
+                }
+
+                break;
+            case "zh-CN":
+                if (gender == "Male")
+                {
+                    string[] maleVoices = new string[]
+                    {
+                        "zh-CN-YunzeNeural",
+                        "zh-CN-YunxiNeural",
+                        "zh-CN-YunyeNeural",
+                    };
+                    selectedVoiceName = maleVoices[random.Next(maleVoices.Length)];
+                }
+                else
+                {
+                    string[] femaleVoices = new string[]
+                    {
+                        "zh-CN-XiaoxiaoNeural",
+                        "zh-CN-XiaohanNeural",
+                        "zh-CN-XiaomoNeural",
+                        "zh-CN-XiaoruiNeural",
+                        "zh-CN-XiaoshuangNeural",
+                        "zh-CN-XiaoyiNeural",
+                        "zh-CN-XiaozhenNeural",
+                    };
+                    selectedVoiceName = femaleVoices[random.Next(femaleVoices.Length)];
+                }
+
+                break;
+        }
+        
+        UnityEngine.Debug.Log($"Selected Voice Name: {selectedVoiceName}");
+    }
+
+    private async Task VocalizeMessage(string message)
+    {
+        if (isSynthesizing)
+        {
+            await synthesizer.StopSpeakingAsync();
+        }
+        isSynthesizing = true;
+        UnityEngine.Debug.Log($"VocalizeMessage: Trying to vocalize message: {message}");
+
+        try
         {
             // Using SSML to specify pitch, speaking rate, etc.
             string ssml = $@"
                 <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>
-                    <voice name='{config.SpeechSynthesisVoiceName}'>
-                        <prosody rate='{prosody_rate}' pitch='{pitch}'>
+                    <voice name='{selectedVoiceName}'>
+                        <prosody contour='(60%,-60%) (100%,+80%)' >
                             {message}
                         </prosody>
                     </voice>
@@ -156,80 +256,73 @@ debugLog += "\n" + settings.gender;
             using (var result = await synthesizer.SpeakSsmlAsync(ssml))
             {
                 if (result.Reason == ResultReason.SynthesizingAudioCompleted)
-                {
-                    var audioData = result.AudioData;
-                    // Convert byte array to WAV, then to AudioClip
-                    WAV wav = new WAV(audioData);
-                    AudioClip audioClip = AudioClip.Create("SynthesizedSpeech", wav.SampleCount, 1, wav.Frequency, false);
-                    audioClip.SetData(wav.LeftChannel, 0);
-                    audioSource.clip = audioClip;
-                    audioSource.Play();
+                {   
+                    UnityEngine.Debug.Log("Speech synthesis succeeded.");
                 }
                 else if (result.Reason == ResultReason.Canceled)
                 {
                     var cancellation = SpeechSynthesisCancellationDetails.FromResult(result);
-                    Console.WriteLine($"CANCELED: Reason={cancellation.Reason}");
-
+                    UnityEngine.Debug.Log($"Speech synthesis canceled: {cancellation.Reason}.");
+                    debugLog += "\n" + "Speech synthesis canceled: " + cancellation.Reason.ToString();
                     if (cancellation.Reason == CancellationReason.Error)
                     {
-                        Console.WriteLine($"CANCELED: ErrorCode={cancellation.ErrorCode}");
-                        Console.WriteLine($"CANCELED: ErrorDetails={cancellation.ErrorDetails}");
-                        Console.WriteLine("CANCELED: Did you update the subscription info?");
+                        UnityEngine.Debug.LogError($"Error code: {cancellation.ErrorCode}");
+                        UnityEngine.Debug.LogError($"Error details: {cancellation.ErrorDetails}");
+                        UnityEngine.Debug.LogError("Did you update the subscription info?");
                     }
                 }
             }
         }
+        catch (Exception ex)
+        {
+            UnityEngine.Debug.LogError($"Error creating SpeechSynthesizer: {ex.Message}");
+            debugLog += "\n" + "Error creating SpeechSynthesizer: " + ex.Message;
+        }
+        finally
+        {
+            isSynthesizing = false;
+        }
     }
+    
     #endregion
 
-    #region Send Force Data to Python
-public enum forceLevel{
-    small,
-    medium,
-    large
-}
+    #region Send Force Data to GPT
+    public enum forceLevel{
+        small,
+        medium,
+        large
+    }
 
-public async Task SendForceDetectedMessage(forceLevel forcelevel){
-//    if (!pressForce.HasValue){
-//        UnityEngine.Debug.LogError("Error: Press force is null.");
-//debugLog += "Error: Press force is null.";
-//        return;
-//    }
-//    else{
-//        UnityEngine.Debug.Log("Force press detected.");
-//debugLog += "Force press detected.";
-
-//    }
-
-    string text = "FORCE PRESS DETECTED. [" + forcelevel.ToString() +"]";
-
-    // Send data to python
-    if (sharedDataWriter != null)
-    {
+    public async Task SendForceDetectedMessage(forceLevel forcelevel){
         try
         {
-            uint responseLength = sharedDataWriter.MeasureString(text);
-            sharedDataWriter.WriteUInt32(responseLength);
-            sharedDataWriter.WriteString(text);
-            await sharedDataWriter.StoreAsync();
-            await sharedDataWriter.FlushAsync();
-            UnityEngine.Debug.Log("Message sent to TCP client: " + text);
-debugLog += "Message sent to TCP client: " + text;
+            string text = "FORCE PRESS DETECTED. [" + forcelevel.ToString() + "]";
+            AddPalpation(user, text);
+            UnityEngine.Debug.Log(text);
+            string patientResponse = await chat.ChatWithPatientAsync(text);
+
+            debugLog += "\n" + forcelevel.ToString() + patientResponse;
+
+            if (forcelevel == forceLevel.large)
+            {
+                UnityEngine.Debug.Log("GPT (Patient): " + patientResponse);
+                await VocalizeMessage(patientResponse);
+                _executeOnMainThread.Enqueue(() => UpdateDisplayText(patientResponse));
+                //UpdateDisplayText(patientResponse);
+                AddDialogue(speaker, patientResponse);
+            }
+
+            
         }
         catch (Exception e)
         {
-            UnityEngine.Debug.LogError("Error sending message to TCP client: " + e.Message);
-debugLog += "Error sending message to TCP client: " + e.Message;
+            debugLog += "\n" + e.ToString();
         }
+        
     }
-    else
-    {
-        UnityEngine.Debug.LogError("TCP connection is not established. Unable to send message.");
-debugLog += "TCP connection is not established. Unable to send message.";
-    }
-}
     #endregion
 
+#if !UNITY_EDITOR
     #region Microphone
     private IEnumerator InitializeMediaCapture()
     {
@@ -243,7 +336,7 @@ debugLog += "TCP connection is not established. Unable to send message.";
         {
             // Handle any exceptions (if any)
             UnityEngine.Debug.LogError("Initialization failed: " + initTask.Exception.ToString());
-debugLog += "\n" + "InitializeMediaCapture failed";
+            //debugLog += "\n" + "InitializeMediaCapture failed";
         }
     }
     public async Task InitializeMediaCaptureAsync()
@@ -258,126 +351,22 @@ debugLog += "\n" + "InitializeMediaCapture failed";
         {
             await mediaCapture.InitializeAsync(settings);
             UnityEngine.Debug.Log("Microphone is accessible");
-debugLog += "\n" + "Microphone is accessible";
+            debugLog += "\n" + "Microphone is accessible";
             // Additional logic for when access is granted
         }
         catch (UnauthorizedAccessException)
         {
             UnityEngine.Debug.Log("Microphone access denied");
-debugLog += "\n" + "Microphone access denied";
+            debugLog += "\n" + "Microphone access denied";
             // Logic to handle when the user has denied access
         }
         catch (Exception ex)
         {
             UnityEngine.Debug.Log($"Initialization failed: {ex.Message}");
-debugLog += "\n" + "InitializeMediaCaptureAsync failed";
-            // Handle other exceptions
-        }
-    }
-    private async void VocalizeMessage(string message)
-    {
-        using (var synthesizer = new Windows.Media.SpeechSynthesis.SpeechSynthesizer())
-        {
-            // Synthesize the text to a stream
-            using (var stream = await synthesizer.SynthesizeTextToStreamAsync(message))
-            {
-                // Set the source of the MediaPlayer to the synthesized audio stream
-                mediaPlayer.Source = MediaSource.CreateFromStream(stream, stream.ContentType);
-                mediaPlayer.Play(); // Play the synthesized speech
-            }
+            debugLog += "\n" + "InitializeMediaCaptureAsync failed";
         }
     }
     #endregion
-
-    #region TCP Connection
-    private async void Listener_ConnectionReceived(StreamSocketListener sender, StreamSocketListenerConnectionReceivedEventArgs args)
-    {
-        UnityEngine.Debug.Log("Connection received");
-debugLog += "\n" + "Connection received";
-
-        //currentArgs = args; // Store the connection arguments
-        sharedDataWriter = new DataWriter(args.Socket.OutputStream);
-        
-        try
-        {
-            using (var dr = new DataReader(args.Socket.InputStream))
-            {
-                dr.InputStreamOptions = InputStreamOptions.Partial;
-                dr.ByteOrder = ByteOrder.LittleEndian;
-debugLog += "\n" + "-3";
-                //await ReceiveSettings(dr); 
-debugLog += "\n" + "-2";
-                await dr.LoadAsync(sizeof(uint)); // Load data for message length
-debugLog += "\n" + "-1";
-
-                // using (var dw = new DataWriter(args.Socket.OutputStream))
-                // {
-                    while (true)
-                    {
-                        UnityEngine.Debug.Log("0");
-debugLog += "\n" + "0";
-                        // Read the length of the incoming message
-                        if (dr.UnconsumedBufferLength < sizeof(uint))
-                        {
-                            await dr.LoadAsync(sizeof(uint) - dr.UnconsumedBufferLength);
-                        }
-
-                        uint messageLength = dr.ReadUInt32();
-                        if (dr.UnconsumedBufferLength < messageLength)
-                        {
-                            await dr.LoadAsync(messageLength - dr.UnconsumedBufferLength);
-                        }
-
-                        UnityEngine.Debug.Log("1");
-debugLog += "\n" + "1";
-                        string input = dr.ReadString(messageLength);
-                        UnityEngine.Debug.Log("Received: " + input);
-                        VocalizeMessage(input);
-                        // Update UI on the main thread
-                        _executeOnMainThread.Enqueue(() => UpdateDisplayText(input));
-
-                        //onGPTReplyReceived(input);
-                        
-
-                        UnityEngine.Debug.Log("2");
-debugLog += "\n" + "2";
-
-                        // Respond back to the sender
-                        // string response = "Acknowledged: " + input;
-                        // uint responseLength = dw.MeasureString(response);
-                        // dw.WriteUInt32(responseLength);
-                        // dw.WriteString(response);
-                        // await dw.StoreAsync();
-                        // await dw.FlushAsync(); // Ensure the data is sent immediately
-                    }
-                //}
-            }
-        }
-        catch (Exception e)
-        {
-            UnityEngine.Debug.Log("Error in Listener_ConnectionReceived: " + e.ToString());
-
-            debugLog += "\n" + "Error in Listener_ConnectionReceived: ";
-        }
-    }  
-    private async void InitializeTCPListener()
-    {
-        try
-        {
-            listener = new StreamSocketListener();
-            listener.ConnectionReceived += Listener_ConnectionReceived;
-            listener.Control.KeepAlive = false;
-            await listener.BindServiceNameAsync(port);
-            UnityEngine.Debug.Log("TCP Listener started on port " + port);
-        }
-        catch (Exception e)
-        {
-            UnityEngine.Debug.LogError("Error initializing TCP listener: " + e.Message);
-debugLog += "\n" + "Error initializing TCP listener: ";
-        }
-    }
-    #endregion
-
 #endif
 
     #region Speech Recognition
@@ -409,48 +398,122 @@ debugLog += "\n" + "Error initializing TCP listener: ";
             errorString = "ERROR: Missing service credentials";
             debugLog += "\n" + "ERROR: Missing service credentials";
             UnityEngine.Debug.LogFormat(errorString);
-
             return;
         }
-        UnityEngine.Debug.LogFormat("Creating Speech Recognizer.");
+        SpeechConfig config = SpeechConfig.FromSubscription(SpeechServiceAPIKey, SpeechServiceRegion);
+        config.SpeechRecognitionLanguage = fromLanguage;
+        recognizer = new SpeechRecognizer(config);
 
-        if (recognizer == null)
+        if (recognizer != null)
         {
-            SpeechConfig config = SpeechConfig.FromSubscription(SpeechServiceAPIKey, SpeechServiceRegion);
-            config.SpeechRecognitionLanguage = fromLanguage;
-            recognizer = new SpeechRecognizer(config);
-
-            if (recognizer != null)
-            {
-                // Subscribes to speech events.
-                recognizer.Recognizing += RecognizingHandler;
-                recognizer.Recognized += RecognizedHandler;
-                recognizer.SpeechStartDetected += SpeechStartDetectedHandler;
-                recognizer.SpeechEndDetected += SpeechEndDetectedHandler;
-                recognizer.Canceled += CanceledHandler;
-                recognizer.SessionStarted += SessionStartedHandler;
-                recognizer.SessionStopped += SessionStoppedHandler;
-            }
+            // Subscribes to speech events.
+            recognizer.Recognizing += RecognizingHandler;
+            recognizer.Recognized += RecognizedHandler;
+            recognizer.SpeechStartDetected += SpeechStartDetectedHandler;
+            recognizer.SpeechEndDetected += SpeechEndDetectedHandler;
+            recognizer.Canceled += CanceledHandler;
+            recognizer.SessionStarted += SessionStartedHandler;
+            recognizer.SessionStopped += SessionStoppedHandler;
         }
+        // }
         UnityEngine.Debug.LogFormat("CreateSpeechRecognizer exit");
         debugLog += "\n" + "CreateSpeechRecognizer exit";
     }
 
-    private async void StartContinuousRecognition()
+    public async Task StartContinuousRecognition()
     {
-        UnityEngine.Debug.LogFormat("Starting Continuous Speech Recognition.");
-        debugLog += "\n" + "Starting Continuous Speech Recognition.";
-        CreateSpeechRecognizer();
-
-        if (recognizer != null)
+        try
         {
-            UnityEngine.Debug.LogFormat("Starting Speech Recognizer.");
-            await recognizer.StartContinuousRecognitionAsync().ConfigureAwait(false);
-            UnityEngine.Debug.LogFormat("Speech Recognizer is now running.");
-            debugLog += "\n" + "Speech Recognizer is now running.";
+            UnityEngine.Debug.LogFormat("Starting Continuous Speech Recognition.");
+            //debugLog += "\n" + "Starting Continuous Speech Recognition.";
+            CreateSpeechRecognizer();
+
+            if (recognizer != null)
+            {
+                UnityEngine.Debug.LogFormat("Starting Speech Recognizer.");
+                await recognizer.StartContinuousRecognitionAsync();//.ConfigureAwait(false);
+                UnityEngine.Debug.LogFormat("Speech Recognizer is now running.");
+                //debugLog += "\n" + "Speech Recognizer is now running.";
+            }
+            UnityEngine.Debug.LogFormat("Start Continuous Speech Recognition exit");
+            debugLog += "\n" + "Start Continuous Speech Recognition exit.";
+
+            
         }
-        UnityEngine.Debug.LogFormat("Start Continuous Speech Recognition exit");
-        debugLog += "\n" + "Start Continuous Speech Recognition exit";
+        catch (Exception e)
+        {
+            debugLog += "\n" + "Error: Starting Continuous Speech Recognition. " + e;
+        }
+        
+    }
+
+    public async Task PauseContinuousRecognition()
+    {
+        try
+        {
+            debugLog += "\nEnter PauseContinuousRecognition";
+            if (recognizer != null && isRecognitionPaused == false)
+            {
+                await recognizer.StopContinuousRecognitionAsync();
+                isRecognitionPaused = true;
+                debugLog += "\nPauseContinuousRecognition. isRecognitionPaused = " + isRecognitionPaused;
+            }
+            debugLog += "\nExit PauseContinuousRecognition";
+        }
+        catch (Exception e)
+        {
+            debugLog += "\nPauseContinuousRecognition" + e.ToString();
+        }
+        
+    }
+
+    public async Task ResumeContinuousRecognition()
+    {
+        try
+        {
+            debugLog += "\nEnter ResumeContinuousRecognition";
+            if (recognizer != null && isRecognitionPaused == true)
+            {
+                await recognizer.StartContinuousRecognitionAsync();
+                isRecognitionPaused = false;
+                debugLog += "\nResumeContinuousRecognition. isRecognitionPaused = " + isRecognitionPaused;
+            }
+            debugLog += "\nExit ResumeContinuousRecognition";
+        }
+        catch (Exception e)
+        {
+            debugLog += "\nResumeContinuousRecognition" + e.ToString();
+        }
+        
+    }
+
+    public async void StopContinuousRecognition()
+    {
+        try
+        {
+            UnityEngine.Debug.LogFormat("Stopping Continuous Speech Recognition.");
+            debugLog += "\n" + "Stopping Continuous Speech Recognition.";
+            //CreateSpeechRecognizer();
+
+            if (recognizer != null)
+            {
+                debugLog += "\n" + "StopContinuousRecognition.";
+
+                UnityEngine.Debug.LogFormat("Stopping Speech Recognizer.");
+                await recognizer.StopContinuousRecognitionAsync();
+                UnityEngine.Debug.LogFormat("Speech Recognizer is now stopping.");
+                //debugLog += "\n" + "Speech Recognizer is now stopping.";
+            }
+            UnityEngine.Debug.LogFormat("Stop Continuous Speech Recognition exit");
+            debugLog += "\n" + "Stop Continuous Speech Recognition exit";
+
+            
+        }
+        catch (Exception e)
+        {
+            debugLog += "\n" + "Error: Stopping Continuous Speech Recognition. " + e;
+        }
+        
     }
 
     private void SessionStartedHandler(object sender, SessionEventArgs e)
@@ -462,6 +525,8 @@ debugLog += "\n" + "Error initializing TCP listener: ";
     {
         UnityEngine.Debug.LogFormat($"\n    Session event. Event: {e.ToString()}.");
         UnityEngine.Debug.LogFormat($"Session Stop detected. Stop the recognition.");
+
+        debugLog += "\nSpeech Recognition SessionStoppedHandler: Reason" + e.ToString();
     }
 
     private void SpeechStartDetectedHandler(object sender, RecognitionEventArgs e)
@@ -494,29 +559,27 @@ debugLog += "\n" + "Error initializing TCP listener: ";
         if (e.Result.Reason == ResultReason.RecognizedSpeech)
         {
             string text = e.Result.Text;
-            if (!String.IsNullOrEmpty(text)){
-                UnityEngine.Debug.LogFormat($"RECOGNIZED: Text={text}");
-                await semaphoreSlim.WaitAsync();
+            if (!String.IsNullOrEmpty(text))
+            {
+                recognizedString = text;
+
+                UnityEngine.Debug.LogFormat($"RECOGNIZED: Text={text}, Language={fromLanguage}");
+                AddDialogue(user, text);
+                UnityEngine.Debug.Log("Human (Doctor): " + text);
+                string patientResponse = await chat.ChatWithPatientAsync(text);
+
                 try
                 {
-                    recognizedString = text;
-
-                    //onSpeechReconized(text);
-
-                    // TODO: Handle the input text, e.g., send it to another function or process it
-#if !UNITY_EDITOR
-                    uint responseLength = sharedDataWriter.MeasureString(text);
-                    sharedDataWriter.WriteUInt32(responseLength);
-                    sharedDataWriter.WriteString(text);
-                    await sharedDataWriter.StoreAsync();
-                    await sharedDataWriter.FlushAsync();
-                    UnityEngine.Debug.Log("Input Text sent to TCP client: " + text);
-#endif
+                    _executeOnMainThread.Enqueue(() => UpdateDisplayText(patientResponse));
                 }
-                finally
+                catch (Exception exception)
                 {
-                    semaphoreSlim.Release();
+                    debugLog += "\n" + exception.ToString();
                 }
+
+                UnityEngine.Debug.Log("GPT (Patient): " + patientResponse);
+                await VocalizeMessage(patientResponse);
+                AddDialogue(speaker, patientResponse);
             }  
         }
         else if (e.Result.Reason == ResultReason.NoMatch)
@@ -532,76 +595,113 @@ debugLog += "\n" + "Error initializing TCP listener: ";
         string errorString = "";
         UnityEngine.Debug.LogFormat($"CANCELED: Reason={e.Reason}");
 
+        debugLog += "\nSpeech Recognition CANCELED: Reason: " + e.Reason;
+
         errorString = e.ToString();
         if (e.Reason == CancellationReason.Error)
         {
             UnityEngine.Debug.LogFormat($"CANCELED: ErrorDetails={e.ErrorDetails}");
             UnityEngine.Debug.LogFormat($"CANCELED: Did you update the subscription info?");
+
+            debugLog += "\nSpeech Recognition CANCELED: ErrorDetails: " + e.ErrorDetails;
         }
     }
-#endregion
+    #endregion
 
-    void Update()
+
+    #region Save Conversation
+    [Serializable]
+    public class Interaction
     {
-        while (_executeOnMainThread.Count > 0) {
-            _executeOnMainThread.Dequeue().Invoke();
-        }
-        // Check if the Enter key is released
-        //if (Input.GetKeyUp(KeyCode.Return))
-        //{
-        //    SubmitInputField();
-        //}
-
-#if !UNITY_EDITOR
-        // Used to update results on screen during updates
-        lock (threadLocker)
-        {
-            RecognizedText.text = recognizedString;
-
-            debugLogText.text = debugLog;
-        }
-#endif
-
-        // if (Input.GetMouseButtonDown(0)) { // If the left mouse button is clicked
-        //     Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-        //     RaycastHit hit;
-        //     if (Physics.Raycast(ray, out hit)) { // If the ray hits an object in the scene
-        //         Vector3 clickPosition = hit.point; // This is your (x,y,z) position
-        //         Debug.Log(clickPosition);
-        //     }
-        // }
+        public string type;
+        public string performer;
+        public string timestamp;
+        public string message;
     }
+
+    [Serializable]
+    public class InteractionData
+    {
+        public List<Interaction> interactions;
+    }
+    public void AddDialogue(string performer, string message)
+    {
+        Interaction dialogue = new Interaction
+        {
+            type = "dialogue",
+            performer = performer,
+            timestamp = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            message = message
+        };
+        interactionData.interactions.Add(dialogue);
+        string dialogueDetails = $"Type: {dialogue.type}, Performer: {dialogue.performer}, Timestamp: {dialogue.timestamp}, Message: {dialogue.message}";
+        UnityEngine.Debug.Log(dialogueDetails);
+    }
+
+    public void AddPalpation(string performer, string message)
+    {
+        Interaction palpation = new Interaction
+        {
+            type = "palpation",
+            performer = performer,
+            timestamp = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            message = message
+        };
+        interactionData.interactions.Add(palpation);
+        string palpationDetails = $"Type: {palpation.type}, Performer: {palpation.performer}, Timestamp: {palpation.timestamp}, Message: {palpation.message}";
+        UnityEngine.Debug.Log(palpationDetails);
+    }
+
+    public void HandleSaveConversationButtonClick()
+    {
+        if (!isRecording)
+        {
+            // First click, record data
+            StartRecordingConversation();
+            isRecording = true; 
+        }
+        else
+        {
+            // Second click, save data
+            SaveConversation();
+            isRecording = false; 
+        }
+    }
+
+    void StartRecordingConversation()
+    {
+        // Clear all the interation history
+        interactionData.interactions.Clear();
+        UnityEngine.Debug.Log("Start Recording New Conversation");
+        debugLog += "\n" + "Start Recording New Conversation";
+    }
+
+    void SaveConversation()
+    {
+        string jsonData = JsonUtility.ToJson(interactionData, true);
+        string fullPath = GenerateUniqueFilePath(persistentPath, fileName + System.DateTime.Now.ToString("yyyy_MMdd_HHmmss"), "json");
+        File.WriteAllText(fullPath, jsonData);   // write data
+        UnityEngine.Debug.Log($"Conversation saved to {fullPath}");
+        debugLog += "\n" + $"Conversation saved to {fullPath}";
+    }
+
+    string GenerateUniqueFilePath(string path, string fileName, string extension)
+    {
+        UnityEngine.Debug.Log("Generating FilePath");
+        string filePathWithoutSuffix = Path.Combine(path, fileName);
+        string fullFilePath = $"{filePathWithoutSuffix}.{extension}";
+        int count = 1;
+        while (File.Exists(fullFilePath))
+        {
+            UnityEngine.Debug.Log("Generating Unique FilePath");
+            fullFilePath = $"{filePathWithoutSuffix}({count}).{extension}";
+            count++; 
+        }
+        return fullFilePath;
+    }
+    #endregion
 
     #region Text
-    //public void OnCllllll(){
-    //    SubmitInputField();
-    //}
-    //public async void SubmitInputField()
-    //{
-    //    if (inputField != null)
-    //    {
-    //        string text = inputField.text; // Get the text from the input field
-    //        if (!String.IsNullOrEmpty(text)){
-    //            // TODO: Handle the input text, e.g., send it to another function or process it
-    //            UnityEngine.Debug.Log("TEXT INPUT: " + text);
-    //            #if !UNITY_EDITOR
-    //            uint responseLength = sharedDataWriter.MeasureString(text);
-    //            sharedDataWriter.WriteUInt32(responseLength);
-    //            sharedDataWriter.WriteString(text);
-    //            await sharedDataWriter.StoreAsync();
-    //            await sharedDataWriter.FlushAsync();
-    //            UnityEngine.Debug.Log("Input Text sent to TCP client: " + text);
-    //            #endif
-    //        }
-            
-    //        // Clear the input field after submitting
-    //        inputField.text = "";
-    //    }
-    //    else
-    //    {
-    //        UnityEngine.Debug.LogError("InputField is not assigned!");
-    //    }
-    //} 
     private void UpdateDisplayText(string text)
     {
         if (displayText != null)
@@ -615,8 +715,301 @@ debugLog += "\n" + "Error initializing TCP listener: ";
         }
     }
 
-#endregion  
+    #endregion  
 
+
+    void Update()
+    {
+        while (_executeOnMainThread.Count > 0) {
+            _executeOnMainThread.Dequeue().Invoke();
+        }
+        if (Input.GetKeyUp(KeyCode.Return))
+        {
+           if (!isRecording)
+           {
+               // First click, record data
+               StartRecordingConversation();
+               isRecording = true; 
+           }
+           else
+           {
+               // Second click, save data
+               SaveConversation();
+               isRecording = false; 
+           }
+        }
+
+        #if !UNITY_EDITOR
+        // Used to update results on screen during updates
+        lock (threadLocker)
+        {
+            RecognizedText.text = recognizedString;
+            debugLogText.text = debugLog;
+        }
+        #endif
+    }
+}
+
+
+public class Palpation
+{
+    #region Palpation Variable
+    private readonly string url = "http://43.163.219.59:8001/beta";
+    private readonly string gptModel = "gpt-3.5-turbo";
+    private string StartSequence = "\nAI (as Patient):";
+    private string RestartSequence = "\nHuman (as Doctor):";
+    private string InitialPrompt;
+    private System.Collections.Generic.List<string> History;
+    private readonly HttpClient Client = new HttpClient();
+
+    [Serializable]
+    public class Data
+    {
+        public string model;
+        public Message[] messages;
+        public int max_tokens;
+    }
+
+    [Serializable]
+    public class Message
+    {
+        public string role;
+        public string content;
+    }
+
+    [Serializable]
+    public class ResponseClass
+    {
+        public Choice[] choices;
+    }
+
+    [Serializable]
+    public class Choice
+    {
+        public Message message;
+    }
+
+    private readonly string force_detected_prompt_high = @"
+    FORCE PRESS DETECTED: There are three levels of forces to be defined: Small, Medium, High.
+    Force pressed by the doctor on the abdomen is High.
+    Talk like a real human, Express body reaction and emotion to tell that you are pain.
+    Do not talk too long.";
+    private readonly string force_detected_prompt_small = @"
+    FORCE PRESS DETECTED: There are three levels of forces to be defined: Small, Medium, High.
+    Force pressed by the doctor on the abdomen is Small. You do not need to give any reaction and say anything.
+    Just keep it in your memory.";
+    private readonly string force_detected_prompt_medium = @"
+    FORCE PRESS DETECTED: There are three levels of forces to be defined: Small, Medium, High.
+    Force pressed by the doctor on the abdomen is Medium. You do not need to give any reaction and say anything.
+    Just keep it in your memory.";
+    #endregion
+
+    public Palpation(object roleSettings)
+    {
+        // 使用 JSON 序列化来格式化角色设置
+        string formattedRoleSettings = JsonUtility.ToJson(roleSettings, true);
+        InitialPrompt = $@"
+            You are a patient going for a palpation medical check up. 
+            Below is your personal detail:\n\n{formattedRoleSettings}\n\n
+            You do not know what disease you are suffering. You are going to the hospital for treatment now. 
+            Please answer in an easy and short way when talking to the doctor. Don't talk too polite and formal.
+            Talk based on the 'Character Traits' listed in above. Reply according to the language that the person talked to you. 
+            You need to have emotion and personality and talk like a real human, e.g., Feel shock and worried when you are told having certain disease.
+            (And also other appropriate emotion such as sad, happy, angry etc.)
+            YOU SHOULD TALK ONLY AS A PATIENT. 
+        ";
+        History = new System.Collections.Generic.List<string> { InitialPrompt };
+    }
+
+    public async Task<string> ChatWithPatientAsync(string message)
+    {
+        if (message == "FORCE PRESS DETECTED. [large]"){
+            message = force_detected_prompt_high;
+            UnityEngine.Debug.Log(message);
+            History.Add(message);
+        }
+        else if (message == "FORCE PRESS DETECTED. [medium]"){
+            History.Add(message);
+            return "";
+        }
+        else if (message == "FORCE PRESS DETECTED. [small]"){
+            History.Add(message);
+            return "";
+        }
+        else{
+            History.Add(RestartSequence + message); 
+        }
+        string prompt = string.Join("", History) + StartSequence;
+        var data = new Data
+        {
+            model = gptModel,
+            messages = new[] { new Message { role = "user", content = prompt } },
+            max_tokens = 1024
+        };
+        string jsonData = JsonUtility.ToJson(data);
+
+        try
+        {
+            Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic",
+                Convert.ToBase64String(Encoding.ASCII.GetBytes("thumt:Thumt@2023")));
+            var content = new StringContent(jsonData, Encoding.UTF8, "application/json");
+            var response = await Client.PostAsync(url, content);
+            response.EnsureSuccessStatusCode();
+            string responseString = await response.Content.ReadAsStringAsync();
+            var responseJson = JsonUtility.FromJson<ResponseClass>(responseString);
+
+            if (responseJson != null && responseJson.choices != null && responseJson.choices.Length > 0)
+            {
+                string patientResponse = responseJson.choices[0].message.content;
+                History.Add(StartSequence + patientResponse); // 添加患者的回答
+                return patientResponse;
+            }
+            else
+            {
+                return "{\"error\": \"No response or invalid format from API\"}";
+            }
+        }
+        catch (Exception e)
+        {
+            return $"{{\"error\": \"Network error: {e.Message}\"}}";
+        }
+    }
+}
+
+public class PatientRoleGenerator
+{
+    #region Patient Variable
+    private readonly string gptModel = "gpt-3.5-turbo";
+    private readonly HttpClient Client = new HttpClient();
+    private readonly string url = "http://43.163.219.59:8001/beta"; 
+    [Serializable]
+    public class Data
+    {
+        public string model;
+        public Message[] messages;
+        public int max_tokens;
+    }
+
+    [Serializable]
+    public class Message
+    {
+        public string role;
+        public string content;
+    }
+
+    [Serializable]
+    public class ResponseClass
+    {
+        public Choice[] choices;
+    }
+
+    [Serializable]
+    public class Choice
+    {
+        public Message message;
+    }
+
+    private string basePrompt = @"
+        Generate a detailed role setting for a patient with hepatomegaly. The sample format is as below. 
+        Change all the settings below and generate a new role. Generate the patient from any country in the world.
+        The gender of the patient must be Male. 
+        role_settings = {
+            ""Role Overview"": {
+                ""Name"": ""Li Ming"",
+                ""Age"": ""52"",
+                ""Gender"": ""Male"",
+                ""Occupation"": ""Senior Engineer"",
+                ""Residence"": ""Urban areas, with a fast pace of life""
+            },
+            ""Character traits"": {
+                ""Communication style"": ""gentle and detailed, willing to share their symptoms and lifestyle habits"",
+                ""Response mode"": ""sensitive to pain, able to respond realistically to different palpation pressures"",
+                ""Emotional state"": ""usually remains calm, but may appear anxious or worried when expressing symptoms""
+            },
+            ""Appearance"": {
+                ""Facial Features"": ""Gentle expression, slightly aged with fine lines, especially around the eyes and forehead"",
+                ""Build"": ""Mildly obese, indicating a sedentary lifestyle"",
+                ""Hair"": ""Thinning, black hair with noticeable graying at the temples"",
+                ""Clothing"": ""Business casual attire, typically a button-up shirt and dress pants, indicative of his senior engineer role"",
+                ""Skin Color"": ""Slightly yellowed skin tone, a subtle indication of his liver condition"",
+                ""Additional Details"": ""Often appears tired, with slight bags under his eyes, reflecting his high work pressure and lack of rest""
+            },
+            ""Visible or Palpable Physical Conditions"": {
+                ""Abdominal swelling"": ""Noticeable bulge in the upper right abdomen, visible when wearing tight clothing"",
+                ""Palpable mass"": ""A firm, non-movable mass can be felt under the rib cage on the right side, indicative of liver enlargement"",
+                ""Specific location of the mass"": ""Primarily located in the right hypochondrium, extending below the rib cage"",
+                ""Skin changes"": ""Yellowing of the skin and sclera, signifying jaundice; possibly spider angiomas on the skin due to liver disease"",
+                ""Other physical signs"": ""Mild peripheral edema in lower extremities, especially noticeable in the ankles by end of day"",
+                ""Sensitivity to pain"": ""Sensitive to pain but can realistically respond to varying pressures during palpation"",
+                ""Tolerance to palpation pressure"": ""1.5 - 3.0 N""
+            },
+            ""Health and Medical Background"": {
+                ""Causes of hepatomegaly"": ""chronic alcoholic liver disease"",
+                ""Symptoms"": ""Initial stage: no obvious symptoms, occasional fatigue and indigestion; progressive stage: pain in the upper right abdomen, weight loss, loss of appetite; recently: significant liver swelling, yellowing of the skin and whites of the eyes (jaundice)"",
+                ""Other health problems"": ""High blood pressure, taking blood pressure medication; Mild obesity""
+            },
+            ""Historical Cases"": {
+                ""Diagnosis time of liver enlargement"": ""1 year ago"",
+                ""Previous medical history"": ""non-alcoholic fatty liver disease (NAFLD), diagnosed 5 years ago; type 2 diabetes, diagnosed 3 years ago; hypertension, diagnosed with diabetes"",
+                ""Family medical history"": ""Father has a history of hypertension and coronary heart disease""
+            },
+            ""Personal lifestyle"": {
+                ""Habits"": ""Long-term drinking, high work pressure, especially frequent social occasions, preference for high-fat and high-salt foods"",
+                ""Exercise habits"": ""Due to busy work, Li Ming rarely has time for physical exercise"",
+                ""Family status"": ""Married with two children, good family relationships but often lack family time due to busy work""
+            },
+            ""Psychological state"": {
+                ""Attitudes towards health"": ""Feeling worried and anxious at the initial diagnosis, and having concerns about future health and lifestyle"",
+                ""Willingness to seek medical treatment"": ""affirmative, hoping to improve health through medical intervention and lifestyle changes"",
+                ""Work pressure"": ""high, requiring frequent overtime and dealing with complex issues"",
+                ""Social activities"": ""mainly work-related socializing, including drinking""
+            }
+        }
+        ";
+
+    #endregion
+
+    public PatientRoleGenerator()
+    {
+        Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes("thumt:Thumt@2023")));
+    }
+
+    public async Task<string> GenerateRoleSettingAsync()
+    {
+        var data = new Data
+        {
+            model = gptModel,
+            messages = new[] { new Message { role = "user", content = basePrompt } },
+            max_tokens = 1024
+        };
+        string jsonData = JsonUtility.ToJson(data);
+
+        try
+        {
+            Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic",
+                Convert.ToBase64String(Encoding.ASCII.GetBytes("thumt:Thumt@2023")));
+            var content = new StringContent(jsonData, Encoding.UTF8, "application/json");
+            var response = await Client.PostAsync(url, content);
+            response.EnsureSuccessStatusCode();
+            string responseString = await response.Content.ReadAsStringAsync();
+            var responseJson = JsonUtility.FromJson<ResponseClass>(responseString);
+
+            if (responseJson != null && responseJson.choices != null && responseJson.choices.Length > 0)
+            {
+                string patientResponse = responseJson.choices[0].message.content;
+                return patientResponse;
+            }
+            else
+            {
+                return "{\"error\": \"No response or invalid format from API\"}";
+            }
+        }
+        catch (Exception e)
+        {
+            return $"{{\"error\": \"Network error: {e.Message}\"}}";
+        }
+    }
 }
 
 

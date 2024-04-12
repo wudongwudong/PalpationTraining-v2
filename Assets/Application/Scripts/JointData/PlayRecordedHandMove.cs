@@ -15,19 +15,15 @@ using Windows.Storage.Streams;
 
 public class PlayRecordedHandMove : MonoBehaviour
 {
-    public Transform handLeft;
-    public Transform handRight;
+    public Transform leftHand;
+    public Transform rightHand;
     public Transform refTransform;
-    public TMP_Text logText;
-    public Vector3 rotOffsetPalmLeft = new Vector3(0, -90, 180);
-    public Vector3 rotOffsetFingerLeft = new Vector3(180, 90, 0);
+    //public TMP_Text logText;
+    //public Vector3 rotOffsetPalmLeft = new Vector3(0, -90, 180);
+    //public Vector3 rotOffsetFingerLeft = new Vector3(180, 90, 0);
 
-    private Rigidbody rbLeft;
-    private Rigidbody rbRight;
-    private Transform[] JointsLeft = new Transform[16];
-    private Transform[] bufJointsLeft = new Transform[16];
-    private Transform[] JointsRight = new Transform[16];
-    private Transform[] bufJointsRight = new Transform[16];
+    private Transform[] trackingJoints_L = new Transform[26];
+    private Transform[] trackingJoints_R = new Transform[26];
 
     private bool startPlaying = false;
     private IList<string> dataStringList;
@@ -43,105 +39,76 @@ public class PlayRecordedHandMove : MonoBehaviour
 
     void Start()
     {
-        rbLeft = handLeft.GetComponent<Rigidbody>();
-        rbRight = handRight.GetComponent<Rigidbody>();
+        string hand_Short = "L";
+        trackingJoints_L[0] = leftHand.Find(hand_Short + "_Wrist/");
+        trackingJoints_L[1] = leftHand.Find(hand_Short + "_Wrist/" + hand_Short + "_Palm");
+        
+        trackingJoints_L[2] = leftHand.Find(hand_Short + "_Wrist/" + hand_Short + "_ThumbMetacarpal");
+        trackingJoints_L[3] = trackingJoints_L[2].GetChild(0);
+        trackingJoints_L[4] = trackingJoints_L[3].GetChild(0);
+        trackingJoints_L[5] = trackingJoints_L[4].GetChild(0);
 
-        //left
-        JointsLeft[0] = handLeft.Find("L_Wrist");
+        trackingJoints_L[6] = leftHand.Find(hand_Short + "_Wrist/" + hand_Short + "_IndexMetacarpal");
+        trackingJoints_L[7] = trackingJoints_L[6].GetChild(0);
+        trackingJoints_L[8] = trackingJoints_L[7].GetChild(0);
+        trackingJoints_L[9] = trackingJoints_L[8].GetChild(0);
+        trackingJoints_L[10] = trackingJoints_L[9].GetChild(0);
 
-        JointsLeft[1] = handLeft.Find("L_Wrist/L_Palm/L_thumb_meta");
-        JointsLeft[2] = JointsLeft[1].GetChild(0);
-        JointsLeft[3] = JointsLeft[2].GetChild(0);
+        trackingJoints_L[11] = leftHand.Find(hand_Short + "_Wrist/" + hand_Short + "_MiddleMetacarpal");
+        trackingJoints_L[12] = trackingJoints_L[11].GetChild(0);
+        trackingJoints_L[13] = trackingJoints_L[12].GetChild(0);
+        trackingJoints_L[14] = trackingJoints_L[13].GetChild(0);
+        trackingJoints_L[15] = trackingJoints_L[14].GetChild(0);
 
-        JointsLeft[4] = handLeft.Find("L_Wrist/L_Palm/L_index_meta/L_index_a");
-        JointsLeft[5] = JointsLeft[4].GetChild(0);
-        JointsLeft[6] = JointsLeft[5].GetChild(0);
+        trackingJoints_L[16] = leftHand.Find(hand_Short + "_Wrist/" + hand_Short + "_RingMetacarpal");
+        trackingJoints_L[17] = trackingJoints_L[16].GetChild(0);
+        trackingJoints_L[18] = trackingJoints_L[17].GetChild(0);
+        trackingJoints_L[19] = trackingJoints_L[18].GetChild(0);
+        trackingJoints_L[20] = trackingJoints_L[19].GetChild(0);
 
-        JointsLeft[7] = handLeft.Find("L_Wrist/L_Palm/L_middle_meta/L_middle_a");
-        JointsLeft[8] = JointsLeft[7].GetChild(0);
-        JointsLeft[9] = JointsLeft[8].GetChild(0);
+        trackingJoints_L[21] = leftHand.Find(hand_Short + "_Wrist/" + hand_Short + "_LittleMetacarpal");
+        trackingJoints_L[22] = trackingJoints_L[21].GetChild(0);
+        trackingJoints_L[23] = trackingJoints_L[22].GetChild(0);
+        trackingJoints_L[24] = trackingJoints_L[23].GetChild(0);
+        trackingJoints_L[25] = trackingJoints_L[24].GetChild(0);
 
-        JointsLeft[10] = handLeft.Find("L_Wrist/L_Palm/L_ring_meta/L_ring_a");
-        JointsLeft[11] = JointsLeft[10].GetChild(0);
-        JointsLeft[12] = JointsLeft[11].GetChild(0);
+        hand_Short = "R";
+        trackingJoints_R[0] = rightHand.Find(hand_Short + "_Wrist/");
+        trackingJoints_R[1] = rightHand.Find(hand_Short + "_Wrist/" + hand_Short + "_Palm");
+        
+        trackingJoints_R[2] = rightHand.Find(hand_Short + "_Wrist/" + hand_Short + "_ThumbMetacarpal");
+        trackingJoints_R[3] = trackingJoints_R[2].GetChild(0);
+        trackingJoints_R[4] = trackingJoints_R[3].GetChild(0);
+        trackingJoints_R[5] = trackingJoints_R[4].GetChild(0);
 
-        JointsLeft[13] = handLeft.Find("L_Wrist/L_Palm/L_pinky_meta/L_pinky_a");
-        JointsLeft[14] = JointsLeft[13].GetChild(0);
-        JointsLeft[15] = JointsLeft[14].GetChild(0);
+        trackingJoints_R[6] = rightHand.Find(hand_Short + "_Wrist/" + hand_Short + "_IndexMetacarpal");
+        trackingJoints_R[7] = trackingJoints_R[6].GetChild(0);
+        trackingJoints_R[8] = trackingJoints_R[7].GetChild(0);
+        trackingJoints_R[9] = trackingJoints_R[8].GetChild(0);
+        trackingJoints_R[10] = trackingJoints_R[9].GetChild(0);
 
-        //
-        bufJointsLeft[0] = handLeft.Find("L_Wrist_Ghost");
+        trackingJoints_R[11] = rightHand.Find(hand_Short + "_Wrist/" + hand_Short + "_MiddleMetacarpal");
+        trackingJoints_R[12] = trackingJoints_R[11].GetChild(0);
+        trackingJoints_R[13] = trackingJoints_R[12].GetChild(0);
+        trackingJoints_R[14] = trackingJoints_R[13].GetChild(0);
+        trackingJoints_R[15] = trackingJoints_R[14].GetChild(0);
 
-        bufJointsLeft[1] = handLeft.Find("L_Wrist_Ghost/L_Palm/L_thumb_meta");
-        bufJointsLeft[2] = bufJointsLeft[1].GetChild(0);
-        bufJointsLeft[3] = bufJointsLeft[2].GetChild(0);
+        trackingJoints_R[16] = rightHand.Find(hand_Short + "_Wrist/" + hand_Short + "_RingMetacarpal");
+        trackingJoints_R[17] = trackingJoints_R[16].GetChild(0);
+        trackingJoints_R[18] = trackingJoints_R[17].GetChild(0);
+        trackingJoints_R[19] = trackingJoints_R[18].GetChild(0);
+        trackingJoints_R[20] = trackingJoints_R[19].GetChild(0);
 
-        bufJointsLeft[4] = handLeft.Find("L_Wrist_Ghost/L_Palm/L_index_meta/L_index_a");
-        bufJointsLeft[5] = bufJointsLeft[4].GetChild(0);
-        bufJointsLeft[6] = bufJointsLeft[5].GetChild(0);
-
-        bufJointsLeft[7] = handLeft.Find("L_Wrist_Ghost/L_Palm/L_middle_meta/L_middle_a");
-        bufJointsLeft[8] = bufJointsLeft[7].GetChild(0);
-        bufJointsLeft[9] = bufJointsLeft[8].GetChild(0);
-
-        bufJointsLeft[10] = handLeft.Find("L_Wrist_Ghost/L_Palm/L_ring_meta/L_ring_a");
-        bufJointsLeft[11] = bufJointsLeft[10].GetChild(0);
-        bufJointsLeft[12] = bufJointsLeft[11].GetChild(0);
-
-        bufJointsLeft[13] = handLeft.Find("L_Wrist_Ghost/L_Palm/L_pinky_meta/L_pinky_a");
-        bufJointsLeft[14] = bufJointsLeft[13].GetChild(0);
-        bufJointsLeft[15] = bufJointsLeft[14].GetChild(0);
-
-        //right
-        JointsRight[0] = handRight.Find("L_Wrist");
-
-        JointsRight[1] = handRight.Find("L_Wrist/L_Palm/L_thumb_meta");
-        JointsRight[2] = JointsRight[1].GetChild(0);
-        JointsRight[3] = JointsRight[2].GetChild(0);
-
-        JointsRight[4] = handRight.Find("L_Wrist/L_Palm/L_index_meta/L_index_a");
-        JointsRight[5] = JointsRight[4].GetChild(0);
-        JointsRight[6] = JointsRight[5].GetChild(0);
-
-        JointsRight[7] = handRight.Find("L_Wrist/L_Palm/L_middle_meta/L_middle_a");
-        JointsRight[8] = JointsRight[7].GetChild(0);
-        JointsRight[9] = JointsRight[8].GetChild(0);
-
-        JointsRight[10] = handRight.Find("L_Wrist/L_Palm/L_ring_meta/L_ring_a");
-        JointsRight[11] = JointsRight[10].GetChild(0);
-        JointsRight[12] = JointsRight[11].GetChild(0);
-
-        JointsRight[13] = handRight.Find("L_Wrist/L_Palm/L_pinky_meta/L_pinky_a");
-        JointsRight[14] = JointsRight[13].GetChild(0);
-        JointsRight[15] = JointsRight[14].GetChild(0);
-
-        //
-        bufJointsRight[0] = handRight.Find("L_Wrist_Ghost");
-
-        bufJointsRight[1] = handRight.Find("L_Wrist_Ghost/L_Palm/L_thumb_meta");
-        bufJointsRight[2] = bufJointsRight[1].GetChild(0);
-        bufJointsRight[3] = bufJointsRight[2].GetChild(0);
-
-        bufJointsRight[4] = handRight.Find("L_Wrist_Ghost/L_Palm/L_index_meta/L_index_a");
-        bufJointsRight[5] = bufJointsRight[4].GetChild(0);
-        bufJointsRight[6] = bufJointsRight[5].GetChild(0);
-
-        bufJointsRight[7] = handRight.Find("L_Wrist_Ghost/L_Palm/L_middle_meta/L_middle_a");
-        bufJointsRight[8] = bufJointsRight[7].GetChild(0);
-        bufJointsRight[9] = bufJointsRight[8].GetChild(0);
-
-        bufJointsRight[10] = handRight.Find("L_Wrist_Ghost/L_Palm/L_ring_meta/L_ring_a");
-        bufJointsRight[11] = bufJointsRight[10].GetChild(0);
-        bufJointsRight[12] = bufJointsRight[11].GetChild(0);
-
-        bufJointsRight[13] = handRight.Find("L_Wrist_Ghost/L_Palm/L_pinky_meta/L_pinky_a");
-        bufJointsRight[14] = bufJointsRight[13].GetChild(0);
-        bufJointsRight[15] = bufJointsRight[14].GetChild(0);
+        trackingJoints_R[21] = rightHand.Find(hand_Short + "_Wrist/" + hand_Short + "_LittleMetacarpal");
+        trackingJoints_R[22] = trackingJoints_R[21].GetChild(0);
+        trackingJoints_R[23] = trackingJoints_R[22].GetChild(0);
+        trackingJoints_R[24] = trackingJoints_R[23].GetChild(0);
+        trackingJoints_R[25] = trackingJoints_R[24].GetChild(0);
     }
 
     public void StartRead()
     {
-        logText.text = "Start read";
+        //logText.text = "Start read";
 
 #if WINDOWS_UWP
         OpenFile();
@@ -151,13 +118,13 @@ public class PlayRecordedHandMove : MonoBehaviour
 #if WINDOWS_UWP
     async void OpenFile()
     {
-        logText.text = "Start playing";
+        //logText.text = "Start playing\n";
         try
         {
             sampleFile = await storageFolder.GetFileAsync("Liver.csv");
             dataStringList = await Windows.Storage.FileIO.ReadLinesAsync(sampleFile);
             rows = dataStringList.Count;
-            logText.text = "Get file " + "Rows:" + rows.ToString();
+            //logText.text += "Get file " + "Rows:" + rows.ToString() + "\n";
             
             if (rows > 2)
             {
@@ -165,12 +132,14 @@ public class PlayRecordedHandMove : MonoBehaviour
             }
             else
             {
-                logText.text += "Not enough data in the file";
+                //logText.text += "Not enough data in the file\n";
+                Debug.Log("Not enough data in the file");
             }
         }
         catch (Exception e)
         {
-            logText.text = e.ToString();
+            //logText.text += "OpenFile exception" + e.ToString() + "\n";
+            Debug.Log(e.ToString());
         }
         
         
@@ -207,7 +176,8 @@ public class PlayRecordedHandMove : MonoBehaviour
                     }
                     catch (Exception e)
                     {
-                        logText.text = e.ToString();
+                        //logText.text += "index: " +index + "\n " + "Move joint exception" + e.ToString() + "\n";
+                        Debug.Log("Move joint exception" + e.ToString());
                     }
                     
                 }
@@ -215,9 +185,12 @@ public class PlayRecordedHandMove : MonoBehaviour
             else
             {
                 //end reading
-                logText.text = "Finish playing";
+                //logText.text += "Finish playing\n";
                 startPlaying = false;
                 index = 0;
+
+                trackingJoints_L[0].localPosition = Vector3.zero;
+                trackingJoints_R[0].localPosition = Vector3.zero;
             }
 
         }
@@ -225,33 +198,11 @@ public class PlayRecordedHandMove : MonoBehaviour
 
     private void MoveJoints(string[] jointsStrings)
     {
+        //logText.text += "jointsStrings Length: " + jointsStrings.Length + "\n";
+
         //Left hand
 
-        //new wrist world transform with respect to reference origin
-        Vector3 wristTarPos = refTransform.TransformPoint(new Vector3(Convert.ToSingle(jointsStrings[1]),
-            Convert.ToSingle(jointsStrings[2]), Convert.ToSingle(jointsStrings[3])));
-        Quaternion wristTarRot = refTransform.rotation * new Quaternion(Convert.ToSingle(jointsStrings[4]),
-            Convert.ToSingle(jointsStrings[5]), Convert.ToSingle(jointsStrings[6]),
-            Convert.ToSingle(jointsStrings[7]));
-
-
-
-        //Vector3 wristTarPos = refTransform.rotation * (refTransform.position + new Vector3(Convert.ToSingle(jointsStrings[1]), Convert.ToSingle(jointsStrings[2]), Convert.ToSingle(jointsStrings[3])));
-        //Quaternion wristTarRot = (new Quaternion(Convert.ToSingle(jointsStrings[4]),
-        //    Convert.ToSingle(jointsStrings[5]), Convert.ToSingle(jointsStrings[6]),
-        //    Convert.ToSingle(jointsStrings[7]))) * refTransform.rotation;
-
-        // wrist position
-        rbLeft.velocity = (wristTarPos - handLeft.position) * playFrequency;
-        // wrist rotation
-        Quaternion deltaRotation = wristTarRot * Quaternion.Inverse(handLeft.rotation);
-        deltaRotation.ToAngleAxis(out float angle, out Vector3 axis);
-        if (float.IsInfinity(axis.x)) { return; }
-        if (angle > 180f) { angle -= 360f; };
-        rbLeft.angularVelocity = angle * axis * Mathf.Deg2Rad * playFrequency;
-
-        //other joints
-        for (int i = 1; i < 16; i++)
+        for (int i = 0; i < 26; i++)
         {
             Vector3 bufPos = Vector3.zero;
             Quaternion bufRot = Quaternion.identity;
@@ -266,16 +217,32 @@ public class PlayRecordedHandMove : MonoBehaviour
                 bufRot[j] = Convert.ToSingle(jointsStrings[1 + j + 3 + i * 7]);
             }
 
-            bufJointsLeft[i].position = refTransform.TransformPoint(bufPos);
-            //bufJointsLeft[i].position = refTransform.rotation * (refTransform.position + bufPos);
-            bufJointsLeft[i].rotation = refTransform.rotation * bufRot;
-
-            JointsLeft[i].localPosition = bufJointsLeft[i].localPosition;
-            JointsLeft[i].localRotation = bufJointsLeft[i].localRotation;
+            trackingJoints_L[i].position = refTransform.TransformPoint(bufPos);
+            trackingJoints_L[i].rotation = refTransform.rotation * bufRot;
         }
 
 
         //Right hand
+
+        for (int i = 26; i < 52; i++)
+        {
+            Vector3 bufPos = Vector3.zero;
+            Quaternion bufRot = Quaternion.identity;
+
+            for (int j = 0; j < 3; j++)
+            {
+                bufPos[j] = Convert.ToSingle(jointsStrings[1 + j + i * 7]);
+            }
+
+            for (int j = 0; j < 4; j++)
+            {
+                bufRot[j] = Convert.ToSingle(jointsStrings[1 + j + 3 + i * 7]);
+            }
+
+            trackingJoints_R[i - 26].position = refTransform.TransformPoint(bufPos);
+            trackingJoints_R[i - 26].rotation = refTransform.rotation * bufRot;
+        }
+
     }
 
 }
