@@ -40,11 +40,12 @@ public class HeadDirectiion : MonoBehaviour
             if (angles[i] < angleThreshold)
             {
 
-                if (isPaused == true)
+                if (holoClient.recognizerState == HoloLensClient.RecognizerState.Stop)
                 {
-                    isPaused = false;
+                    //isPaused = false;
 
                     await holoClient.ResumeContinuousRecognition();
+                    Debug.Log("Start recognition");
                     //holoClient.speechDetectSwitch = true;
                     //text.text += "start";
                 }
@@ -53,12 +54,13 @@ public class HeadDirectiion : MonoBehaviour
             }
         }
 
-        if (isPaused == false)
+        if (holoClient.recognizerState == HoloLensClient.RecognizerState.Start)
         {
-            isPaused = true;
+            //isPaused = true;
 
             //holoClient.speechDetectSwitch = false;
             await holoClient.PauseContinuousRecognition();
+            Debug.Log("Stop recognition");
             //text.text += "stop";
         }
 
@@ -70,14 +72,14 @@ public class HeadDirectiion : MonoBehaviour
         enable = true;
     }
 
-    public void DisableLookSpeech()
+    public async void DisableLookSpeech()
     {
         enable = false;
 
-        if (holoClient.isRecognitionPaused == true)
+        if (holoClient.recognizerState == HoloLensClient.RecognizerState.Stop)
         {
-            holoClient.ResumeContinuousRecognition();
-            holoClient.isRecognitionPaused = false;
+            await holoClient.ResumeContinuousRecognition();
+            //holoClient.isRecognitionPaused = false;
             //text.text += "start";
         }
     }

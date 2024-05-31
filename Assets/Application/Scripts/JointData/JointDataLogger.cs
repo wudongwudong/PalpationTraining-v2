@@ -5,7 +5,7 @@ using UnityEngine;
 using System.IO;
 using OfficeOpenXml;
 using System.Linq;
-
+using HaptGlove;
 using Microsoft;
 using Microsoft.MixedReality.Toolkit.Utilities;
 using Microsoft.MixedReality.Toolkit.Input;
@@ -35,8 +35,8 @@ public class JointDataLogger : MonoBehaviour
 
     private Transform[] trackingJoints_L = new Transform[26];
     private Transform[] trackingJoints_R = new Transform[26];
-    public Transform leftHand;
-    public Transform rightHand; 
+    private Transform leftHand;
+    private Transform rightHand; 
     //public GameObject dialog;
     private Transform refTransform;
     //string dialogText;
@@ -44,9 +44,13 @@ public class JointDataLogger : MonoBehaviour
 
     MixedRealityPose pose;
 
+    public bool recordForce = false;
 
     void Start()
     {
+        leftHand = GameObject.Find("Left Hand Physics").transform;
+        rightHand = GameObject.Find("Right Hand Physics").transform;
+
         string hand_Short = "L";
         trackingJoints_L[0] = leftHand.Find(hand_Short + "_Wrist/"); 
         trackingJoints_L[1] = leftHand.Find(hand_Short + "_Wrist/" + hand_Short + "_Palm");
@@ -112,6 +116,7 @@ public class JointDataLogger : MonoBehaviour
         trackingJoints_R[23] = trackingJoints_R[22].GetChild(0);
         trackingJoints_R[24] = trackingJoints_R[23].GetChild(0);
         trackingJoints_R[25] = trackingJoints_R[24].GetChild(0);
+
     }
 
     //define filePath
@@ -166,6 +171,38 @@ public class JointDataLogger : MonoBehaviour
             headers += "R" + jointName + "_Qw,";
         }
 
+        headers += "Time Stamp,";
+
+        if (recordForce)
+        {
+            headers += "L" + "Thumb_Pos,";
+            headers += "L" + "Index_Pos,";
+            headers += "L" + "Middle_Pos,";
+            headers += "L" + "Ring_Pos,";
+
+            headers += "R" + "Thumb_Pos,";
+            headers += "R" + "Index_Pos,";
+            headers += "R" + "Middle_Pos,";
+            headers += "R" + "Ring_Pos,";
+
+            headers += "L" + "Thumb_Pres,";
+            headers += "L" + "Index_Pres,";
+            headers += "L" + "Middle_Pres,";
+            headers += "L" + "Ring_Pres,";
+            headers += "L" + "Pinky_Pres,";
+            headers += "L" + "Palm_Pres,";
+            headers += "L" + "Source_Pres,";
+
+            headers += "R" + "Thumb_Pres,";
+            headers += "R" + "Index_Pres,";
+            headers += "R" + "Middle_Pres,";
+            headers += "R" + "Ring_Pres,";
+            headers += "R" + "Pinky_Pres,";
+            headers += "R" + "Palm_Pres,";
+            headers += "R" + "Source_Pres,";
+
+        }
+
         headers += "\r\n";
 
         return headers;
@@ -210,14 +247,19 @@ public class JointDataLogger : MonoBehaviour
         //Create csv file
         CreateFile();      
 #endif
+        StartCoroutine(DelayStartRecord());
+    }
+
+    private IEnumerator DelayStartRecord()
+    {
+        yield return new WaitForSeconds(1);
+
         GameObject trackingRef = GameObject.Find("HandTrackingRef");
         if (trackingRef != null)
         {
             refTransform = trackingRef.transform;
             fileCreate = true;
         }
-        
-        
     }
 
     public void EndRecord()
@@ -245,7 +287,6 @@ public class JointDataLogger : MonoBehaviour
             {
                 return;
             }
-
             _timer += Time.deltaTime;
             if (_timer > (1 / savingFrequency))
             {
@@ -301,6 +342,36 @@ public class JointDataLogger : MonoBehaviour
                     rot = rot.Replace("(", "");
                     rot = rot.Replace(")", ",");
                     lineData += rot;
+                }
+
+                lineData += DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")+ ",";
+
+                if (recordForce)
+                {
+                    int[] buf = leftHand.GetComponent<HaptGloveHandler>().GetFingerPosition();
+                    for (int i = 0; i < 4; i++)
+                    {
+                        lineData += buf[i] + ",";
+                    }
+
+                    buf = rightHand.GetComponent<HaptGloveHandler>().GetFingerPosition();
+                    for (int i = 0; i < 4; i++)
+                    {
+                        lineData += buf[i] + ",";
+                    }
+
+                    buf = leftHand.GetComponent<HaptGloveHandler>().GetAirPressure();
+                    for (int i = 0; i < 7; i++)
+                    {
+                        lineData += buf[i] + ",";
+                    }
+
+                    buf = rightHand.GetComponent<HaptGloveHandler>().GetAirPressure();
+                    for (int i = 0; i < 7; i++)
+                    {
+                        lineData += buf[i] + ",";
+                    }
+
                 }
 
                 _timer -= 1 / savingFrequency;

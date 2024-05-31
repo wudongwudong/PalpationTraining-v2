@@ -44,7 +44,7 @@ public class HoloLensClient : MonoBehaviour
     [HideInInspector] public string SpeechServiceAPIKey = "890b6fc23e9742eca9f5912f65186a1a";
     [HideInInspector] public string SpeechServiceRegion = "southeastasia";
     private SpeechRecognizer recognizer;
-    string fromLanguage = "en-US";   //zh-CN
+    public static string fromLanguage = "en-US";   //zh-CN
     private bool micPermissionGranted = false;
     public AudioSource audioSource;
     private AudioClip audioClip;
@@ -52,23 +52,32 @@ public class HoloLensClient : MonoBehaviour
     private string gender = "Male";
     public static System.Random random = new System.Random();
     private string selectedVoiceName = null;
-    public bool isRecognitionPaused = false;
+    //[HideInInspector] public bool isRecognitionPaused = false;
+    public enum RecognizerState
+    {
+        Stop,
+        Start,
+        Processing,
+        Error
+    }
+    public RecognizerState recognizerState = RecognizerState.Stop;
     private SpeechSynthesizer synthesizer;
     private bool isSynthesizing = false;
     private Palpation chat;
+    private bool enableVocalize = true;
 
     //Save Conversations
     private string user = "Doctor";
     private string speaker = "Patient";
     private string persistentPath;
     string fileName = "ConvData";
-    public InteractionData interactionData = new InteractionData();
+    [HideInInspector] public InteractionData interactionData = new InteractionData();
     private bool isRecording = false;
 
-    #if !UNITY_EDITOR  
+#if !UNITY_EDITOR
     private MediaPlayer mediaPlayer = new MediaPlayer(); 
         
-    #endif
+#endif
 
     //Unity events
     public UnityAction<string> onSpeechReconized;
@@ -96,9 +105,11 @@ public class HoloLensClient : MonoBehaviour
     async void Start()
     {
         persistentPath = Application.persistentDataPath;
-
+        
         UnityEngine.Debug.Log("Start");
         debugLog += "\n" + "start";
+
+        recognizerState = RecognizerState.Processing;
 
         try
         {
@@ -108,12 +119,12 @@ public class HoloLensClient : MonoBehaviour
         {
             debugLog += e.ToString();
         }
-        
+
         debugLog += "\n" + "Role settings generate.";
         micPermissionGranted = true;
         StartContinuous();
 
-        ChooseVoiceNameAndVocalizeMessage();
+        ChooseVoiceName();
 
         var config = SpeechConfig.FromSubscription(SpeechServiceAPIKey, SpeechServiceRegion);
         config.SpeechSynthesisLanguage = fromLanguage;  // 设置语言
@@ -128,6 +139,40 @@ public class HoloLensClient : MonoBehaviour
 
     public async void ReconnectGPT()
     {
+        await ReconnectGPTTask();
+    }
+    private async Task ReconnectGPTTask()
+    {
+        recognizerState = RecognizerState.Processing;
+
+        if (recognizer != null)
+        {
+            await recognizer.StopContinuousRecognitionAsync().ContinueWith(task =>
+            {
+                if (task.IsFaulted)
+                {
+                    debugLog += "\n" + "Error stopping continuous recognition: " + task.Exception.ToString();
+                    recognizerState = RecognizerState.Error;
+                    //debugLog += "\nrecognizerState: " + recognizerState;
+                }
+                else if (task.IsCanceled)
+                {
+                    debugLog += "\n" + "Continuous recognition stopping is canceled.";
+                    recognizerState = RecognizerState.Error;
+                    //debugLog += "\nrecognizerState: " + recognizerState;
+                }
+                else
+                {
+                    //debugLog += "\n" + "Continuous recognition stopped successfully.";
+                    //recognizerState = RecognizerState.Stop;
+                    //debugLog += "\nrecognizerState: " + recognizerState;
+                }
+
+                recognizer.Dispose();
+                recognizer = null;
+            });
+        }
+
         try
         {
             debugLog += "\n Reconnect GPT";
@@ -141,7 +186,14 @@ public class HoloLensClient : MonoBehaviour
         debugLog += "\n" + "Role settings generate.";
         micPermissionGranted = true;
         StartContinuous();
-        // saveConversationButton.onClick.AddListener(HandleSaveConversationButtonClick);
+
+        ChooseVoiceName();
+
+        var config = SpeechConfig.FromSubscription(SpeechServiceAPIKey, SpeechServiceRegion);
+        config.SpeechSynthesisLanguage = fromLanguage;  // 设置语言
+        config.SpeechSynthesisVoiceName = selectedVoiceName;
+        synthesizer = new SpeechSynthesizer(config);
+
 #if !UNITY_EDITOR
         StartCoroutine(InitializeMediaCapture());
 #endif
@@ -159,7 +211,24 @@ public class HoloLensClient : MonoBehaviour
     #endregion
 
     #region Receive Data and Vocalize
-    private void ChooseVoiceNameAndVocalizeMessage()
+
+    public async void ChangeVoiceToEn()
+    {
+        fromLanguage = "en-US";
+
+        //await StopContinuousRecognition();
+        await ReconnectGPTTask();
+    }
+
+    public async void ChangeVoiceToZh()
+    {
+        fromLanguage = "zh-CN";
+
+        //await StopContinuousRecognition();
+        await ReconnectGPTTask();
+    }
+
+    private void ChooseVoiceName()
     {
         var config = SpeechConfig.FromSubscription(SpeechServiceAPIKey, SpeechServiceRegion);
         config.SpeechSynthesisLanguage = fromLanguage;
@@ -227,12 +296,31 @@ public class HoloLensClient : MonoBehaviour
 
                 break;
         }
-        
+
         UnityEngine.Debug.Log($"Selected Voice Name: {selectedVoiceName}");
+    }
+
+    public void EnableVocalize()
+    {
+        enableVocalize = true;
+    }
+
+    public void DisableVocalize()
+    {
+        enableVocalize = false;
     }
 
     private async Task VocalizeMessage(string message)
     {
+        if (enableVocalize == false)
+        {
+            return;
+        }
+        if (recognizerState != RecognizerState.Start)
+        {
+            return;
+        }
+
         if (isSynthesizing)
         {
             await synthesizer.StopSpeakingAsync();
@@ -244,7 +332,7 @@ public class HoloLensClient : MonoBehaviour
         {
             // Using SSML to specify pitch, speaking rate, etc.
             string ssml = $@"
-                <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>
+                <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='{selectedVoiceName}'>
                     <voice name='{selectedVoiceName}'>
                         <prosody contour='(60%,-60%) (100%,+80%)' >
                             {message}
@@ -256,7 +344,7 @@ public class HoloLensClient : MonoBehaviour
             using (var result = await synthesizer.SpeakSsmlAsync(ssml))
             {
                 if (result.Reason == ResultReason.SynthesizingAudioCompleted)
-                {   
+                {
                     UnityEngine.Debug.Log("Speech synthesis succeeded.");
                 }
                 else if (result.Reason == ResultReason.Canceled)
@@ -283,17 +371,19 @@ public class HoloLensClient : MonoBehaviour
             isSynthesizing = false;
         }
     }
-    
+
     #endregion
 
     #region Send Force Data to GPT
-    public enum forceLevel{
+    public enum forceLevel
+    {
         small,
         medium,
         large
     }
 
-    public async Task SendForceDetectedMessage(forceLevel forcelevel){
+    public async Task SendForceDetectedMessage(forceLevel forcelevel)
+    {
         try
         {
             string text = "FORCE PRESS DETECTED. [" + forcelevel.ToString() + "]";
@@ -312,13 +402,13 @@ public class HoloLensClient : MonoBehaviour
                 AddDialogue(speaker, patientResponse);
             }
 
-            
+
         }
         catch (Exception e)
         {
             debugLog += "\n" + e.ToString();
         }
-        
+
     }
     #endregion
 
@@ -417,11 +507,15 @@ public class HoloLensClient : MonoBehaviour
         }
         // }
         UnityEngine.Debug.LogFormat("CreateSpeechRecognizer exit");
-        debugLog += "\n" + "CreateSpeechRecognizer exit";
+        //debugLog += "\n" + "CreateSpeechRecognizer exit";
     }
 
     public async Task StartContinuousRecognition()
     {
+        recognizerState = RecognizerState.Processing;
+        //debugLog += "\nrecognizerState: " + recognizerState;
+        //debugLog += "\nStart enter";
+
         try
         {
             UnityEngine.Debug.LogFormat("Starting Continuous Speech Recognition.");
@@ -431,89 +525,194 @@ public class HoloLensClient : MonoBehaviour
             if (recognizer != null)
             {
                 UnityEngine.Debug.LogFormat("Starting Speech Recognizer.");
-                await recognizer.StartContinuousRecognitionAsync();//.ConfigureAwait(false);
+                await recognizer.StartContinuousRecognitionAsync().ContinueWith(task =>
+                {
+                    if (task.IsFaulted)
+                    {
+                        debugLog += "\n" + "Error starting continuous recognition: " + task.Exception.ToString();
+                        recognizerState = RecognizerState.Error;
+                        //debugLog += "\nrecognizerState: " + recognizerState;
+                    }
+                    else if (task.IsCanceled)
+                    {
+                        debugLog += "\n" + "Continuous starting pausing is canceled.";
+                        recognizerState = RecognizerState.Error;
+                        //debugLog += "\nrecognizerState: " + recognizerState;
+                    }
+                    else
+                    {
+                        //debugLog += "\n" + "Continuous recognition started successfully.";
+                        recognizerState = RecognizerState.Start;
+                        //debugLog += "\nrecognizerState: " + recognizerState;
+                    }
+                });//.ConfigureAwait(false);
                 UnityEngine.Debug.LogFormat("Speech Recognizer is now running.");
                 //debugLog += "\n" + "Speech Recognizer is now running.";
             }
             UnityEngine.Debug.LogFormat("Start Continuous Speech Recognition exit");
-            debugLog += "\n" + "Start Continuous Speech Recognition exit.";
+            //debugLog += "\n" + "Start Continuous Speech Recognition exit.";
 
-            
+
         }
         catch (Exception e)
         {
             debugLog += "\n" + "Error: Starting Continuous Speech Recognition. " + e;
+            recognizerState = RecognizerState.Error;
+            //debugLog += "\nrecognizerState: " + recognizerState;
         }
-        
+
     }
 
     public async Task PauseContinuousRecognition()
     {
+        //debugLog += "\nPause enter";
+
         try
         {
-            debugLog += "\nEnter PauseContinuousRecognition";
-            if (recognizer != null && isRecognitionPaused == false)
+            //debugLog += "\nEnter PauseContinuousRecognition";
+            if (recognizer != null && recognizerState == RecognizerState.Start)
             {
-                await recognizer.StopContinuousRecognitionAsync();
-                isRecognitionPaused = true;
-                debugLog += "\nPauseContinuousRecognition. isRecognitionPaused = " + isRecognitionPaused;
+                recognizerState = RecognizerState.Processing;
+                //debugLog += "\nrecognizerState: " + recognizerState;
+
+                await recognizer.StopContinuousRecognitionAsync().ContinueWith(task =>
+                {
+                    if (task.IsFaulted)
+                    {
+                        debugLog += "\n" + "Error pausing continuous recognition: " + task.Exception.ToString();
+                        recognizerState = RecognizerState.Error;
+                        //debugLog += "\nrecognizerState: " + recognizerState;
+                    }
+                    else if (task.IsCanceled)
+                    {
+                        debugLog += "\n" + "Continuous recognition pausing is canceled.";
+                        recognizerState = RecognizerState.Error;
+                        //debugLog += "\nrecognizerState: " + recognizerState;
+                    }
+                    else
+                    {
+                        //debugLog += "\n" + "Continuous recognition paused successfully.";
+                        recognizerState = RecognizerState.Stop;
+                        //debugLog += "\nrecognizerState: " + recognizerState;
+                    }
+                });
+                //isRecognitionPaused = true;
+                //debugLog += "\nPauseContinuousRecognition. isRecognitionPaused = " + recognizerState.ToString();
             }
             debugLog += "\nExit PauseContinuousRecognition";
         }
         catch (Exception e)
         {
             debugLog += "\nPauseContinuousRecognition" + e.ToString();
+            recognizerState = RecognizerState.Error;
+            //debugLog += "\nrecognizerState: " + recognizerState;
         }
-        
+
     }
 
     public async Task ResumeContinuousRecognition()
     {
+        //debugLog += "\nResume enter";
+
         try
         {
-            debugLog += "\nEnter ResumeContinuousRecognition";
-            if (recognizer != null && isRecognitionPaused == true)
+            //debugLog += "\nEnter ResumeContinuousRecognition";
+            if (recognizer != null && recognizerState == RecognizerState.Stop)
             {
-                await recognizer.StartContinuousRecognitionAsync();
-                isRecognitionPaused = false;
-                debugLog += "\nResumeContinuousRecognition. isRecognitionPaused = " + isRecognitionPaused;
+                recognizerState = RecognizerState.Processing;
+                //debugLog += "\nrecognizerState: " + recognizerState;
+
+                await recognizer.StartContinuousRecognitionAsync().ContinueWith(task =>
+                {
+                    if (task.IsFaulted)
+                    {
+                        debugLog += "\n" + "Error resuming continuous recognition: " + task.Exception.ToString();
+                        recognizerState = RecognizerState.Error;
+                        //debugLog += "\nrecognizerState: " + recognizerState;
+                    }
+                    else if (task.IsCanceled)
+                    {
+                        debugLog += "\n" + "Continuous recognition resuming is canceled.";
+                        recognizerState = RecognizerState.Error;
+                        //debugLog += "\nrecognizerState: " + recognizerState;
+                    }
+                    else
+                    {
+                        //debugLog += "\n" + "Continuous recognition resumed successfully.";
+                        recognizerState = RecognizerState.Start;
+                        //debugLog += "\nrecognizerState: " + recognizerState;
+                    }
+                });
+                //isRecognitionPaused = false;
+                debugLog += "\nResumeContinuousRecognition. isRecognitionPaused = " + recognizerState;
             }
-            debugLog += "\nExit ResumeContinuousRecognition";
+            //debugLog += "\nExit ResumeContinuousRecognition";
         }
         catch (Exception e)
         {
             debugLog += "\nResumeContinuousRecognition" + e.ToString();
+            recognizerState = RecognizerState.Error;
+            //debugLog += "\nrecognizerState: " + recognizerState;
         }
-        
+
     }
 
-    public async void StopContinuousRecognition()
+    public async Task StopContinuousRecognition()
     {
+        //debugLog += "\nStop enter";
+
         try
         {
             UnityEngine.Debug.LogFormat("Stopping Continuous Speech Recognition.");
-            debugLog += "\n" + "Stopping Continuous Speech Recognition.";
+            //debugLog += "\n" + "Stopping Continuous Speech Recognition.";
             //CreateSpeechRecognizer();
 
             if (recognizer != null)
             {
-                debugLog += "\n" + "StopContinuousRecognition.";
+                recognizerState = RecognizerState.Processing;
+                //debugLog += "\nrecognizerState: " + recognizerState;
+                //debugLog += "\n" + "StopContinuousRecognition.";
 
                 UnityEngine.Debug.LogFormat("Stopping Speech Recognizer.");
-                await recognizer.StopContinuousRecognitionAsync();
+                await recognizer.StopContinuousRecognitionAsync().ContinueWith(task =>
+                {
+                    if (task.IsFaulted)
+                    {
+                        debugLog += "\n" + "Error stopping continuous recognition: " + task.Exception.ToString();
+                        recognizerState = RecognizerState.Error;
+                        //debugLog += "\nrecognizerState: " + recognizerState;
+                    }
+                    else if (task.IsCanceled)
+                    {
+                        debugLog += "\n" + "Continuous recognition stopping is canceled.";
+                        recognizerState = RecognizerState.Error;
+                        //debugLog += "\nrecognizerState: " + recognizerState;
+                    }
+                    else
+                    {
+                        //debugLog += "\n" + "Continuous recognition stopped successfully.";
+                        recognizerState = RecognizerState.Stop;
+                        //debugLog += "\nrecognizerState: " + recognizerState;
+                    }
+
+                    recognizer.Dispose();
+                    recognizer = null;
+                });
                 UnityEngine.Debug.LogFormat("Speech Recognizer is now stopping.");
                 //debugLog += "\n" + "Speech Recognizer is now stopping.";
             }
             UnityEngine.Debug.LogFormat("Stop Continuous Speech Recognition exit");
-            debugLog += "\n" + "Stop Continuous Speech Recognition exit";
+            //debugLog += "\n" + "Stop Continuous Speech Recognition exit";
 
-            
+
         }
         catch (Exception e)
         {
             debugLog += "\n" + "Error: Stopping Continuous Speech Recognition. " + e;
+            recognizerState = RecognizerState.Error;
+            //debugLog += "\nrecognizerState: " + recognizerState;
         }
-        
+
     }
 
     private void SessionStartedHandler(object sender, SessionEventArgs e)
@@ -567,6 +766,7 @@ public class HoloLensClient : MonoBehaviour
                 AddDialogue(user, text);
                 UnityEngine.Debug.Log("Human (Doctor): " + text);
                 string patientResponse = await chat.ChatWithPatientAsync(text);
+                UnityEngine.Debug.Log(string.Join(", ", chat.History));
 
                 try
                 {
@@ -580,7 +780,7 @@ public class HoloLensClient : MonoBehaviour
                 UnityEngine.Debug.Log("GPT (Patient): " + patientResponse);
                 await VocalizeMessage(patientResponse);
                 AddDialogue(speaker, patientResponse);
-            }  
+            }
         }
         else if (e.Result.Reason == ResultReason.NoMatch)
         {
@@ -596,6 +796,7 @@ public class HoloLensClient : MonoBehaviour
         UnityEngine.Debug.LogFormat($"CANCELED: Reason={e.Reason}");
 
         debugLog += "\nSpeech Recognition CANCELED: Reason: " + e.Reason;
+
 
         errorString = e.ToString();
         if (e.Reason == CancellationReason.Error)
@@ -630,7 +831,7 @@ public class HoloLensClient : MonoBehaviour
         {
             type = "dialogue",
             performer = performer,
-            timestamp = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
             message = message
         };
         interactionData.interactions.Add(dialogue);
@@ -644,7 +845,7 @@ public class HoloLensClient : MonoBehaviour
         {
             type = "palpation",
             performer = performer,
-            timestamp = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
             message = message
         };
         interactionData.interactions.Add(palpation);
@@ -652,19 +853,17 @@ public class HoloLensClient : MonoBehaviour
         UnityEngine.Debug.Log(palpationDetails);
     }
 
-    public void HandleSaveConversationButtonClick()
+    public void HandleSaveConversationButtonClick(bool startRecording)
     {
-        if (!isRecording)
+        if (startRecording)
         {
             // First click, record data
             StartRecordingConversation();
-            isRecording = true; 
         }
         else
         {
             // Second click, save data
             SaveConversation();
-            isRecording = false; 
         }
     }
 
@@ -695,7 +894,7 @@ public class HoloLensClient : MonoBehaviour
         {
             UnityEngine.Debug.Log("Generating Unique FilePath");
             fullFilePath = $"{filePathWithoutSuffix}({count}).{extension}";
-            count++; 
+            count++;
         }
         return fullFilePath;
     }
@@ -720,33 +919,45 @@ public class HoloLensClient : MonoBehaviour
 
     void Update()
     {
-        while (_executeOnMainThread.Count > 0) {
+        while (_executeOnMainThread.Count > 0)
+        {
             _executeOnMainThread.Dequeue().Invoke();
         }
         if (Input.GetKeyUp(KeyCode.Return))
         {
-           if (!isRecording)
-           {
-               // First click, record data
-               StartRecordingConversation();
-               isRecording = true; 
-           }
-           else
-           {
-               // Second click, save data
-               SaveConversation();
-               isRecording = false; 
-           }
+            if (!isRecording)
+            {
+                // First click, record data
+                StartRecordingConversation();
+                isRecording = true;
+            }
+            else
+            {
+                // Second click, save data
+                SaveConversation();
+                isRecording = false;
+            }
         }
 
-        #if !UNITY_EDITOR
+#if !UNITY_EDITOR
         // Used to update results on screen during updates
         lock (threadLocker)
         {
             RecognizedText.text = recognizedString;
             debugLogText.text = debugLog;
         }
-        #endif
+#endif
+    }
+
+    private async void OnDestroy()
+    {
+        if (recognizer != null)
+        {
+            // Stop continuous recognition when the object is destroyed
+            await recognizer.StopContinuousRecognitionAsync();
+            recognizer.Dispose();
+
+        }
     }
 }
 
@@ -759,7 +970,7 @@ public class Palpation
     private string StartSequence = "\nAI (as Patient):";
     private string RestartSequence = "\nHuman (as Doctor):";
     private string InitialPrompt;
-    private System.Collections.Generic.List<string> History;
+    public System.Collections.Generic.List<string> History;
     private readonly HttpClient Client = new HttpClient();
 
     [Serializable]
@@ -796,48 +1007,59 @@ public class Palpation
     Do not talk too long.";
     private readonly string force_detected_prompt_small = @"
     FORCE PRESS DETECTED: There are three levels of forces to be defined: Small, Medium, High.
-    Force pressed by the doctor on the abdomen is Small. You do not need to give any reaction and say anything.
+    Force pressed by the doctor on the abdomen is Small. You don't feel any pain because of the doctor's pressing.
+    So, if doctor ask if you feel pain there, you should talk like a real human and say no. 
+    You do not need to give any reaction and say anything.
     Just keep it in your memory.";
     private readonly string force_detected_prompt_medium = @"
     FORCE PRESS DETECTED: There are three levels of forces to be defined: Small, Medium, High.
-    Force pressed by the doctor on the abdomen is Medium. You do not need to give any reaction and say anything.
+    Force pressed by the doctor on the abdomen is Medium. You feel some pressure because of the doctor's pressing but it's not painful.
+    So, if doctor ask if you feel pain there, you should talk like a real human and say I feel some pressure but not painful.
+    You do not need to give any reaction and say anything.
     Just keep it in your memory.";
     #endregion
 
-    public Palpation(object roleSettings)
+    public Palpation(string roleSettings)
     {
-        // 使用 JSON 序列化来格式化角色设置
-        string formattedRoleSettings = JsonUtility.ToJson(roleSettings, true);
+        // // 使用 JSON 序列化来格式化角色设置
+        // string formattedRoleSettings = JsonUtility.ToJson(roleSettings, true);
         InitialPrompt = $@"
-            You are a patient going for a palpation medical check up. 
-            Below is your personal detail:\n\n{formattedRoleSettings}\n\n
-            You do not know what disease you are suffering. You are going to the hospital for treatment now. 
+            You are a patient to the hospital for a palpation medical check up. 
             Please answer in an easy and short way when talking to the doctor. Don't talk too polite and formal.
             Talk based on the 'Character Traits' listed in above. Reply according to the language that the person talked to you. 
             You need to have emotion and personality and talk like a real human, e.g., Feel shock and worried when you are told having certain disease.
             (And also other appropriate emotion such as sad, happy, angry etc.)
-            YOU SHOULD TALK ONLY AS A PATIENT. 
+            YOU SHOULD TALK ONLY AS A PATIENT, and tell your name correctly.
+            You should talk in {HoloLensClient.fromLanguage}.
+            Below is your personal detail:
+            {roleSettings}
         ";
         History = new System.Collections.Generic.List<string> { InitialPrompt };
     }
 
     public async Task<string> ChatWithPatientAsync(string message)
     {
-        if (message == "FORCE PRESS DETECTED. [large]"){
+        if (message == "FORCE PRESS DETECTED. [large]")
+        {
             message = force_detected_prompt_high;
             UnityEngine.Debug.Log(message);
             History.Add(message);
         }
-        else if (message == "FORCE PRESS DETECTED. [medium]"){
+        else if (message == "FORCE PRESS DETECTED. [medium]")
+        {
+            message = force_detected_prompt_medium;
             History.Add(message);
-            return "";
+            //return "";
         }
-        else if (message == "FORCE PRESS DETECTED. [small]"){
+        else if (message == "FORCE PRESS DETECTED. [small]")
+        {
+            message = force_detected_prompt_small;
             History.Add(message);
-            return "";
+            //return "";
         }
-        else{
-            History.Add(RestartSequence + message); 
+        else
+        {
+            History.Add(RestartSequence + message);
         }
         string prompt = string.Join("", History) + StartSequence;
         var data = new Data
@@ -861,7 +1083,7 @@ public class Palpation
             if (responseJson != null && responseJson.choices != null && responseJson.choices.Length > 0)
             {
                 string patientResponse = responseJson.choices[0].message.content;
-                History.Add(StartSequence + patientResponse); // 添加患者的回答
+                History.Add(StartSequence + patientResponse);
                 return patientResponse;
             }
             else
@@ -881,7 +1103,7 @@ public class PatientRoleGenerator
     #region Patient Variable
     private readonly string gptModel = "gpt-3.5-turbo";
     private readonly HttpClient Client = new HttpClient();
-    private readonly string url = "http://43.163.219.59:8001/beta"; 
+    private readonly string url = "http://43.163.219.59:8001/beta";
     [Serializable]
     public class Data
     {
@@ -911,8 +1133,8 @@ public class PatientRoleGenerator
 
     private string basePrompt = @"
         Generate a detailed role setting for a patient with hepatomegaly. The sample format is as below. 
-        Change all the settings below and generate a new role. Generate the patient from any country in the world.
-        The gender of the patient must be Male. 
+        Change all the settings below and generate a new role. The patient MUST feel pain in the right upper abdomen.
+        The gender of the patient must be Male.
         role_settings = {
             ""Role Overview"": {
                 ""Name"": ""Li Ming"",
@@ -926,22 +1148,12 @@ public class PatientRoleGenerator
                 ""Response mode"": ""sensitive to pain, able to respond realistically to different palpation pressures"",
                 ""Emotional state"": ""usually remains calm, but may appear anxious or worried when expressing symptoms""
             },
-            ""Appearance"": {
-                ""Facial Features"": ""Gentle expression, slightly aged with fine lines, especially around the eyes and forehead"",
-                ""Build"": ""Mildly obese, indicating a sedentary lifestyle"",
-                ""Hair"": ""Thinning, black hair with noticeable graying at the temples"",
-                ""Clothing"": ""Business casual attire, typically a button-up shirt and dress pants, indicative of his senior engineer role"",
-                ""Skin Color"": ""Slightly yellowed skin tone, a subtle indication of his liver condition"",
-                ""Additional Details"": ""Often appears tired, with slight bags under his eyes, reflecting his high work pressure and lack of rest""
-            },
             ""Visible or Palpable Physical Conditions"": {
                 ""Abdominal swelling"": ""Noticeable bulge in the upper right abdomen, visible when wearing tight clothing"",
-                ""Palpable mass"": ""A firm, non-movable mass can be felt under the rib cage on the right side, indicative of liver enlargement"",
-                ""Specific location of the mass"": ""Primarily located in the right hypochondrium, extending below the rib cage"",
+                ""Location of pain"": ""Right upper abdomen"",
                 ""Skin changes"": ""Yellowing of the skin and sclera, signifying jaundice; possibly spider angiomas on the skin due to liver disease"",
                 ""Other physical signs"": ""Mild peripheral edema in lower extremities, especially noticeable in the ankles by end of day"",
                 ""Sensitivity to pain"": ""Sensitive to pain but can realistically respond to varying pressures during palpation"",
-                ""Tolerance to palpation pressure"": ""1.5 - 3.0 N""
             },
             ""Health and Medical Background"": {
                 ""Causes of hepatomegaly"": ""chronic alcoholic liver disease"",
@@ -957,12 +1169,6 @@ public class PatientRoleGenerator
                 ""Habits"": ""Long-term drinking, high work pressure, especially frequent social occasions, preference for high-fat and high-salt foods"",
                 ""Exercise habits"": ""Due to busy work, Li Ming rarely has time for physical exercise"",
                 ""Family status"": ""Married with two children, good family relationships but often lack family time due to busy work""
-            },
-            ""Psychological state"": {
-                ""Attitudes towards health"": ""Feeling worried and anxious at the initial diagnosis, and having concerns about future health and lifestyle"",
-                ""Willingness to seek medical treatment"": ""affirmative, hoping to improve health through medical intervention and lifestyle changes"",
-                ""Work pressure"": ""high, requiring frequent overtime and dealing with complex issues"",
-                ""Social activities"": ""mainly work-related socializing, including drinking""
             }
         }
         ";

@@ -1,5 +1,7 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
+using HaptGlove;
 using UnityEngine;
 
 public class Test : MonoBehaviour
@@ -8,25 +10,36 @@ public class Test : MonoBehaviour
     public Transform child;
     public Transform secondParent;
 
+    public HaptGloveHandler gloveHandler;
+    void Start()
+    {
+        byte[] data = gloveHandler.haptics.SetClutchState("Thumb", true);
+
+
+        //gloveHandler.haptics.whichHand = "Right";
+        data = gloveHandler.haptics.ApplyHaptics(data, 10, false);
+        Debug.Log(BitConverter.ToString(data));
+    }
+
     void Update()
     {
-        //get child local position and local orientation
-        Vector3 localPosition = Quaternion.Inverse(parent.rotation) * (child.position - parent.position);
-        Debug.Log("local position:" + localPosition.ToString("F4"));
+        ////get child local position and local orientation
+        //Vector3 localPosition = Quaternion.Inverse(parent.rotation) * (child.position - parent.position);
+        //Debug.Log("local position:" + localPosition.ToString("F4"));
 
-        Quaternion localOrientation = Quaternion.Inverse(parent.rotation)* child.rotation ;
-        Debug.Log("local orientation:" + localOrientation.eulerAngles.ToString("F4"));
-
-
-        //world position if the cube have a same local position with the first parent
-        Vector3 worldPosition = Quaternion.Inverse(secondParent.rotation) * localPosition+secondParent.position;
-        Debug.Log("world position:" + worldPosition.ToString("F4"));
-        worldPosition = secondParent.rotation * localPosition + secondParent.position;
-        Debug.Log("world position:" + worldPosition.ToString("F4"));
+        //Quaternion localOrientation = Quaternion.Inverse(parent.rotation)* child.rotation ;
+        //Debug.Log("local orientation:" + localOrientation.eulerAngles.ToString("F4"));
 
 
-        worldPosition = secondParent.TransformPoint(localPosition);
-        Debug.Log("world position:" + worldPosition.ToString("F4"));
+        ////world position if the cube have a same local position with the first parent
+        //Vector3 worldPosition = Quaternion.Inverse(secondParent.rotation) * localPosition+secondParent.position;
+        //Debug.Log("world position:" + worldPosition.ToString("F4"));
+        //worldPosition = secondParent.rotation * localPosition + secondParent.position;
+        //Debug.Log("world position:" + worldPosition.ToString("F4"));
+
+
+        //worldPosition = secondParent.TransformPoint(localPosition);
+        //Debug.Log("world position:" + worldPosition.ToString("F4"));
 
 
 
