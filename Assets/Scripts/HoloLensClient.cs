@@ -29,13 +29,13 @@ using UnityEngine.UI;
 public class HoloLensClient : MonoBehaviour
 {
 
-    #region Variables
+#region Variables
     // UI
-    //public TMP_InputField inputField;
+    // public TMP_InputField inputField;
     public TextMeshProUGUI displayText;
     public TextMeshProUGUI RecognizedText;
     private string recognizedString = "";
-    //public Button saveConversationButton;
+    // public Button saveConversationButton;
     private System.Object threadLocker = new System.Object();
 
     // Microsoft Cognitive Speech Service
@@ -52,7 +52,7 @@ public class HoloLensClient : MonoBehaviour
     private string gender = "Male";
     public static System.Random random = new System.Random();
     private string selectedVoiceName = null;
-    //[HideInInspector] public bool isRecognitionPaused = false;
+    // [HideInInspector] public bool isRecognitionPaused = false;
     public enum RecognizerState
     {
         Stop,
@@ -66,29 +66,99 @@ public class HoloLensClient : MonoBehaviour
     private Palpation chat;
     private bool enableVocalize = true;
 
-    //Save Conversations
+    // Save Conversations
     private string user = "Doctor";
     private string speaker = "Patient";
+    private string evaluator = "GPT Evaluator";
     private string persistentPath;
     string fileName = "ConvData";
     [HideInInspector] public InteractionData interactionData = new InteractionData();
     private bool isRecording = false;
 
-#if !UNITY_EDITOR
-    private MediaPlayer mediaPlayer = new MediaPlayer(); 
-        
-#endif
-
-    //Unity events
+    #if !UNITY_EDITOR
+    private MediaPlayer mediaPlayer = new MediaPlayer();   
+    #endif
+    
+    // Unity events
     public UnityAction<string> onSpeechReconized;
     public UnityAction<string> onGPTReplyReceived;
 
-    //Show Debug.Log
+    // Show Debug.Log
     public TextMeshProUGUI debugLogText;
     [HideInInspector] public string debugLog;
 
-    #endregion
+    // Checklist Questioning
+    public Button endClinicalDiagnoseButton;
 
+#endregion
+
+#region Main Task
+    // Initialization
+    async void Start()
+    {
+        persistentPath = Application.persistentDataPath;
+        UnityEngine.Debug.Log("Start");
+        debugLog += "\n" + "start";
+        recognizerState = RecognizerState.Processing;
+        try
+        {
+            await HoloLensClient.GPTInilization(this);
+        }
+        catch (Exception e)
+        {
+            debugLog += e.ToString();
+        }
+        debugLog += "\n" + "Role settings generate.";
+        micPermissionGranted = true;
+        StartContinuous();
+        ChooseVoiceName();
+        var config = SpeechConfig.FromSubscription(SpeechServiceAPIKey, SpeechServiceRegion);
+        config.SpeechSynthesisLanguage = fromLanguage;  // 设置语言
+        config.SpeechSynthesisVoiceName = selectedVoiceName;
+        synthesizer = new SpeechSynthesizer(config);
+        StartRecordingConversation();
+        // saveConversationButton.onClick.AddListener(HandleSaveConversationButtonClick);
+        endClinicalDiagnoseButton.onClick.AddListener(delegate { SaveInteraction(true); });
+        #if !UNITY_EDITOR
+        StartCoroutine(InitializeMediaCapture());
+        #endif
+    }
+    void Update()
+    {
+        while (_executeOnMainThread.Count > 0)
+        {
+            _executeOnMainThread.Dequeue().Invoke();
+        }
+        if (Input.GetKeyUp(KeyCode.Return))
+        {
+            if (!isRecording)
+            {
+                // First click, end diagnose session
+                // StartRecordingConversation();
+                SaveInteraction(true);
+                isRecording = true;
+            }
+        }
+
+        #if !UNITY_EDITOR
+        // Used to update results on screen during updates
+        lock (threadLocker)
+        {
+            RecognizedText.text = recognizedString;
+            debugLogText.text = debugLog;
+        }
+        #endif
+    }
+    private async void OnDestroy()
+    {
+        if (recognizer != null)
+        {
+            // Stop continuous recognition when the object is destroyed
+            await recognizer.StopContinuousRecognitionAsync();
+            recognizer.Dispose();
+
+        }
+    }
     //void Awake()
     //{
     //    persistentPath = Application.persistentDataPath;
@@ -100,43 +170,9 @@ public class HoloLensClient : MonoBehaviour
     //        audioSource.playOnAwake = false;
     //    }
     //}
+#endregion
 
-    // Use this for initialization
-    async void Start()
-    {
-        persistentPath = Application.persistentDataPath;
-        
-        UnityEngine.Debug.Log("Start");
-        debugLog += "\n" + "start";
-
-        recognizerState = RecognizerState.Processing;
-
-        try
-        {
-            await HoloLensClient.GPTInilization(this);
-        }
-        catch (Exception e)
-        {
-            debugLog += e.ToString();
-        }
-
-        debugLog += "\n" + "Role settings generate.";
-        micPermissionGranted = true;
-        StartContinuous();
-
-        ChooseVoiceName();
-
-        var config = SpeechConfig.FromSubscription(SpeechServiceAPIKey, SpeechServiceRegion);
-        config.SpeechSynthesisLanguage = fromLanguage;  // 设置语言
-        config.SpeechSynthesisVoiceName = selectedVoiceName;
-        synthesizer = new SpeechSynthesizer(config);
-
-        // saveConversationButton.onClick.AddListener(HandleSaveConversationButtonClick);
-#if !UNITY_EDITOR
-        StartCoroutine(InitializeMediaCapture());
-#endif
-    }
-
+#region Reconnect GPT
     public async void ReconnectGPT()
     {
         await ReconnectGPTTask();
@@ -167,7 +203,6 @@ public class HoloLensClient : MonoBehaviour
                     //recognizerState = RecognizerState.Stop;
                     //debugLog += "\nrecognizerState: " + recognizerState;
                 }
-
                 recognizer.Dispose();
                 recognizer = null;
             });
@@ -198,8 +233,9 @@ public class HoloLensClient : MonoBehaviour
         StartCoroutine(InitializeMediaCapture());
 #endif
     }
+#endregion
 
-    #region GPT Initialization
+#region GPT Initialization
     public static async Task GPTInilization(HoloLensClient instance)
     {
         PatientRoleGenerator patient = new PatientRoleGenerator();
@@ -208,9 +244,9 @@ public class HoloLensClient : MonoBehaviour
         UnityEngine.Debug.Log(patientRole);
         instance.chat = new Palpation(patientRole);
     }
-    #endregion
+#endregion
 
-    #region Receive Data and Vocalize
+#region Receive Data and Vocalize
 
     public async void ChangeVoiceToEn()
     {
@@ -372,9 +408,9 @@ public class HoloLensClient : MonoBehaviour
         }
     }
 
-    #endregion
+#endregion
 
-    #region Send Force Data to GPT
+#region Send Force Data to GPT
     public enum forceLevel
     {
         small,
@@ -410,10 +446,10 @@ public class HoloLensClient : MonoBehaviour
         }
 
     }
-    #endregion
+#endregion
 
-#if !UNITY_EDITOR
-    #region Microphone
+#region Microphone
+    #if !UNITY_EDITOR
     private IEnumerator InitializeMediaCapture()
     {
         Task initTask = InitializeMediaCaptureAsync();
@@ -456,10 +492,10 @@ public class HoloLensClient : MonoBehaviour
             debugLog += "\n" + "InitializeMediaCaptureAsync failed";
         }
     }
-    #endregion
-#endif
+    #endif
+#endregion
 
-    #region Speech Recognition
+#region Speech Recognition
     public void StartContinuous()
     {
         string errorString = "";
@@ -807,10 +843,9 @@ public class HoloLensClient : MonoBehaviour
             debugLog += "\nSpeech Recognition CANCELED: ErrorDetails: " + e.ErrorDetails;
         }
     }
-    #endregion
+#endregion
 
-
-    #region Save Conversation
+#region Save Conversation & Checklist
     [Serializable]
     public class Interaction
     {
@@ -838,7 +873,6 @@ public class HoloLensClient : MonoBehaviour
         string dialogueDetails = $"Type: {dialogue.type}, Performer: {dialogue.performer}, Timestamp: {dialogue.timestamp}, Message: {dialogue.message}";
         UnityEngine.Debug.Log(dialogueDetails);
     }
-
     public void AddPalpation(string performer, string message)
     {
         Interaction palpation = new Interaction
@@ -852,19 +886,83 @@ public class HoloLensClient : MonoBehaviour
         string palpationDetails = $"Type: {palpation.type}, Performer: {palpation.performer}, Timestamp: {palpation.timestamp}, Message: {palpation.message}";
         UnityEngine.Debug.Log(palpationDetails);
     }
-
-    public void HandleSaveConversationButtonClick(bool startRecording)
+    public void AddQuestion(string performer, string message)
     {
-        if (startRecording)
+        Interaction question = new Interaction
         {
-            // First click, record data
-            StartRecordingConversation();
-        }
-        else
-        {
-            // Second click, save data
+            type = "question",
+            performer = performer,
+            timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+            message = message
+        };
+        interactionData.interactions.Add(question);
+        string questionDetails = $"Type: {question.type}, Performer: {question.performer}, Timestamp: {question.timestamp}, Message: {question.message}";
+        UnityEngine.Debug.Log(questionDetails);
+    }
+    public async void SaveInteraction(bool startChecklist){
+        if (startChecklist){
+            await checklistQuestioning();
             SaveConversation();
         }
+        
+    }
+    // public void HandleSaveConversationButtonClick(bool startRecording)
+    // {
+    //     if (startRecording)
+    //     {
+    //         // First click, record data
+    //         StartRecordingConversation();
+    //     }
+    //     else
+    //     {
+    //         // Second click, save data
+    //         SaveConversation();
+    //     }
+    // }
+
+    public async Task checklistQuestioning(){
+        string instruction = "You are an evaluator. I will ask you some questions about the clinical interactions mentioned above. Please answer with 'yes' or 'no'.\n";
+        string[] Questions = new string[]
+        {
+            "Did the person introduce themselves as a doctor to the patient?",
+            "Did the person explain the examination procedure to the patient?",
+            "Did the person ask about the patient's symptoms?"
+        };
+        foreach (string question in Questions){
+            string answer = "";
+            UnityEngine.Debug.Log("Evaluator (GPT): " + question);
+            int retryCount = 0;
+            while (retryCount < 5){    // Limit to 5 retries
+                try{
+                    string patientResponse = await chat.ChatWithPatientAsync(instruction + "Evaluator (GPT): " + question);
+                    UnityEngine.Debug.Log(string.Join(", ", chat.History));
+                    UnityEngine.Debug.Log(patientResponse);
+                    patientResponse = patientResponse.ToLower(); 
+                    answer = "";
+                    if (patientResponse.Contains("yes")){
+                        answer = " [yes]";
+                        break;
+                    }
+                    else if (patientResponse.Contains("no")){
+                        answer = " [no]";
+                        break;
+                    }
+                    retryCount++;
+                }
+                catch (Exception ex)
+                {
+                    UnityEngine.Debug.LogError("Checklist Questioning Error: " + ex.Message);
+                    retryCount++;
+                    if (retryCount >= 5)
+                    {
+                        answer = " [error]";
+                        break;
+                    }
+                }
+            }
+            AddQuestion(evaluator, question + answer);
+        }
+        
     }
 
     void StartRecordingConversation()
@@ -875,7 +973,7 @@ public class HoloLensClient : MonoBehaviour
         debugLog += "\n" + "Start Recording New Conversation";
     }
 
-    void SaveConversation()
+    public void SaveConversation()
     {
         string jsonData = JsonUtility.ToJson(interactionData, true);
         string fullPath = GenerateUniqueFilePath(persistentPath, fileName + System.DateTime.Now.ToString("yyyy_MMdd_HHmmss"), "json");
@@ -898,9 +996,9 @@ public class HoloLensClient : MonoBehaviour
         }
         return fullFilePath;
     }
-    #endregion
+#endregion
 
-    #region Text
+#region Text UI
     private void UpdateDisplayText(string text)
     {
         if (displayText != null)
@@ -914,57 +1012,13 @@ public class HoloLensClient : MonoBehaviour
         }
     }
 
-    #endregion  
+#endregion  
 
-
-    void Update()
-    {
-        while (_executeOnMainThread.Count > 0)
-        {
-            _executeOnMainThread.Dequeue().Invoke();
-        }
-        if (Input.GetKeyUp(KeyCode.Return))
-        {
-            if (!isRecording)
-            {
-                // First click, record data
-                StartRecordingConversation();
-                isRecording = true;
-            }
-            else
-            {
-                // Second click, save data
-                SaveConversation();
-                isRecording = false;
-            }
-        }
-
-#if !UNITY_EDITOR
-        // Used to update results on screen during updates
-        lock (threadLocker)
-        {
-            RecognizedText.text = recognizedString;
-            debugLogText.text = debugLog;
-        }
-#endif
-    }
-
-    private async void OnDestroy()
-    {
-        if (recognizer != null)
-        {
-            // Stop continuous recognition when the object is destroyed
-            await recognizer.StopContinuousRecognitionAsync();
-            recognizer.Dispose();
-
-        }
-    }
 }
-
 
 public class Palpation
 {
-    #region Palpation Variable
+#region Palpation Variable
     private readonly string url = "http://43.163.219.59:8001/beta";
     private readonly string gptModel = "gpt-3.5-turbo";
     private string StartSequence = "\nAI (as Patient):";
@@ -1017,7 +1071,7 @@ public class Palpation
     So, if doctor ask if you feel pain there, you should talk like a real human and say I feel some pressure but not painful.
     You do not need to give any reaction and say anything.
     Just keep it in your memory.";
-    #endregion
+#endregion
 
     public Palpation(string roleSettings)
     {
@@ -1039,29 +1093,37 @@ public class Palpation
 
     public async Task<string> ChatWithPatientAsync(string message)
     {
+        string prompt = "";
         if (message == "FORCE PRESS DETECTED. [large]")
         {
             message = force_detected_prompt_high;
             UnityEngine.Debug.Log(message);
             History.Add(message);
+            prompt = string.Join("", History) + StartSequence;
         }
         else if (message == "FORCE PRESS DETECTED. [medium]")
         {
             message = force_detected_prompt_medium;
             History.Add(message);
             //return "";
+            prompt = string.Join("", History) + StartSequence;
         }
         else if (message == "FORCE PRESS DETECTED. [small]")
         {
             message = force_detected_prompt_small;
             History.Add(message);
             //return "";
+            prompt = string.Join("", History) + StartSequence;
+        }
+        else if (message.Contains("Evaluator (GPT)")){ 
+            History.Add(message);
+            prompt = string.Join("", History);
         }
         else
         {
             History.Add(RestartSequence + message);
+            prompt = string.Join("", History) + StartSequence;
         }
-        string prompt = string.Join("", History) + StartSequence;
         var data = new Data
         {
             model = gptModel,
@@ -1073,7 +1135,7 @@ public class Palpation
         try
         {
             Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic",
-                Convert.ToBase64String(Encoding.ASCII.GetBytes("thumt:Thumt@2023")));
+                Convert.ToBase64String(Encoding.ASCII.GetBytes("AgentHospital:Macon")));
             var content = new StringContent(jsonData, Encoding.UTF8, "application/json");
             var response = await Client.PostAsync(url, content);
             response.EnsureSuccessStatusCode();
@@ -1083,7 +1145,12 @@ public class Palpation
             if (responseJson != null && responseJson.choices != null && responseJson.choices.Length > 0)
             {
                 string patientResponse = responseJson.choices[0].message.content;
-                History.Add(StartSequence + patientResponse);
+                if (message.Contains("Evaluator (GPT)")){ 
+                    History.Add("Evaluator (GPT)" + patientResponse);
+                }
+                else{
+                    History.Add(StartSequence + message);
+                }
                 return patientResponse;
             }
             else
@@ -1100,7 +1167,7 @@ public class Palpation
 
 public class PatientRoleGenerator
 {
-    #region Patient Variable
+#region Patient Variable
     private readonly string gptModel = "gpt-3.5-turbo";
     private readonly HttpClient Client = new HttpClient();
     private readonly string url = "http://43.163.219.59:8001/beta";
@@ -1173,12 +1240,12 @@ public class PatientRoleGenerator
         }
         ";
 
-    #endregion
+#endregion
 
     public PatientRoleGenerator()
     {
-        Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes("thumt:Thumt@2023")));
+        // Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+        //     "Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes("thumt:Thumt@2023")));
     }
 
     public async Task<string> GenerateRoleSettingAsync()
@@ -1193,8 +1260,8 @@ public class PatientRoleGenerator
 
         try
         {
-            Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic",
-                Convert.ToBase64String(Encoding.ASCII.GetBytes("thumt:Thumt@2023")));
+            Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes("AgentHospital:Macon")));
             var content = new StringContent(jsonData, Encoding.UTF8, "application/json");
             var response = await Client.PostAsync(url, content);
             response.EnsureSuccessStatusCode();
