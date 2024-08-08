@@ -88,7 +88,7 @@ public class HoloLensClient : MonoBehaviour
     [HideInInspector] public string debugLog;
 
     // Checklist Questioning
-    public Button endClinicalDiagnoseButton;
+    //public Button endClinicalDiagnoseButton;
 
 #endregion
 
@@ -116,12 +116,14 @@ public class HoloLensClient : MonoBehaviour
         config.SpeechSynthesisLanguage = fromLanguage;  // 设置语言
         config.SpeechSynthesisVoiceName = selectedVoiceName;
         synthesizer = new SpeechSynthesizer(config);
-        StartRecordingConversation();
+        ClearInteractionsHistory();
         // saveConversationButton.onClick.AddListener(HandleSaveConversationButtonClick);
-        endClinicalDiagnoseButton.onClick.AddListener(delegate { SaveInteraction(true); });
-        #if !UNITY_EDITOR
+        // endClinicalDiagnoseButton.onClick.AddListener(delegate { SaveInteraction(true); });
+#if !UNITY_EDITOR
         StartCoroutine(InitializeMediaCapture());
-        #endif
+#endif
+
+        await VocalizeMessage("Hi Doctor.", true);
     }
     void Update()
     {
@@ -134,7 +136,7 @@ public class HoloLensClient : MonoBehaviour
             if (!isRecording)
             {
                 // First click, end diagnose session
-                // StartRecordingConversation();
+                // ClearInteractionsHistory();
                 SaveInteraction(true);
                 isRecording = true;
             }
@@ -176,6 +178,7 @@ public class HoloLensClient : MonoBehaviour
     public async void ReconnectGPT()
     {
         await ReconnectGPTTask();
+        await VocalizeMessage("Hi Doctor.", true);
     }
     private async Task ReconnectGPTTask()
     {
@@ -211,6 +214,7 @@ public class HoloLensClient : MonoBehaviour
         try
         {
             debugLog += "\n Reconnect GPT";
+            UnityEngine.Debug.Log("Reconnect GPT");
             await HoloLensClient.GPTInilization(this);
         }
         catch (Exception e)
@@ -219,6 +223,7 @@ public class HoloLensClient : MonoBehaviour
         }
 
         debugLog += "\n" + "Role settings generate.";
+        UnityEngine.Debug.Log("Role settings generate.");
         micPermissionGranted = true;
         StartContinuous();
 
@@ -232,6 +237,7 @@ public class HoloLensClient : MonoBehaviour
 #if !UNITY_EDITOR
         StartCoroutine(InitializeMediaCapture());
 #endif
+        ClearInteractionsHistory();
     }
 #endregion
 
@@ -346,13 +352,13 @@ public class HoloLensClient : MonoBehaviour
         enableVocalize = false;
     }
 
-    private async Task VocalizeMessage(string message)
+    private async Task VocalizeMessage(string message, bool forceSpeak)
     {
-        if (enableVocalize == false)
+        if (!enableVocalize & !forceSpeak)
         {
             return;
         }
-        if (recognizerState != RecognizerState.Start)
+        if ((recognizerState != RecognizerState.Start) & !forceSpeak)
         {
             return;
         }
@@ -432,7 +438,7 @@ public class HoloLensClient : MonoBehaviour
             if (forcelevel == forceLevel.large)
             {
                 UnityEngine.Debug.Log("GPT (Patient): " + patientResponse);
-                await VocalizeMessage(patientResponse);
+                await VocalizeMessage(patientResponse, false);
                 _executeOnMainThread.Enqueue(() => UpdateDisplayText(patientResponse));
                 //UpdateDisplayText(patientResponse);
                 AddDialogue(speaker, patientResponse);
@@ -814,7 +820,7 @@ public class HoloLensClient : MonoBehaviour
                 }
 
                 UnityEngine.Debug.Log("GPT (Patient): " + patientResponse);
-                await VocalizeMessage(patientResponse);
+                await VocalizeMessage(patientResponse, false);
                 AddDialogue(speaker, patientResponse);
             }
         }
@@ -906,19 +912,21 @@ public class HoloLensClient : MonoBehaviour
         }
         
     }
-    // public void HandleSaveConversationButtonClick(bool startRecording)
-    // {
-    //     if (startRecording)
-    //     {
-    //         // First click, record data
-    //         StartRecordingConversation();
-    //     }
-    //     else
-    //     {
-    //         // Second click, save data
-    //         SaveConversation();
-    //     }
-    // }
+    public void HandleSaveConversationButtonClick(bool startRecording)
+    {
+        if (startRecording)
+        {
+            // First click, record data
+            ClearInteractionsHistory();
+        }
+        else
+        {
+            // Second click, save data
+            SaveInteraction(true);
+
+            //SaveConversation();
+        }
+    }
 
     public async Task checklistQuestioning(){
         string instruction = "You are an evaluator. I will ask you some questions about the clinical interactions mentioned above. Please answer with 'yes' or 'no'.\n";
@@ -928,6 +936,7 @@ public class HoloLensClient : MonoBehaviour
             "Did the person explain the examination procedure to the patient?",
             "Did the person ask about the patient's symptoms?"
         };
+        
         foreach (string question in Questions){
             string answer = "";
             UnityEngine.Debug.Log("Evaluator (GPT): " + question);
@@ -962,10 +971,10 @@ public class HoloLensClient : MonoBehaviour
             }
             AddQuestion(evaluator, question + answer);
         }
-        
+        debugLog += "\nHistory: " + string.Join(", ", chat.History);
     }
 
-    void StartRecordingConversation()
+    void ClearInteractionsHistory()
     {
         // Clear all the interation history
         interactionData.interactions.Clear();
