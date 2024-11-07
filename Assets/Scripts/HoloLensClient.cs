@@ -89,10 +89,17 @@ public class HoloLensClient : MonoBehaviour
 
     // Checklist Questioning
     //public Button endClinicalDiagnoseButton;
+    [HideInInspector] public List<string> questionResults = new List<string>();
+    [HideInInspector] public string[] Questions = new string[]
+    {
+        "Did the person introduce himself as a doctor?",
+        "Did the doctor explain the examination procedure to the patient?",
+        "Did the doctor ask about the patient's symptoms?"
+    };
 
 #endregion
 
-#region Main Task
+    #region Main Task
     // Initialization
     async void Start()
     {
@@ -246,7 +253,7 @@ public class HoloLensClient : MonoBehaviour
     {
         PatientRoleGenerator patient = new PatientRoleGenerator();
         string patientRole = await patient.GenerateRoleSettingAsync();
-        patientRole = patientRole.Replace("role_settings = ", "");
+        patientRole = patientRole.Replace("role_settings = ", "").Replace("```json","").Replace("````","");
         UnityEngine.Debug.Log(patientRole);
         instance.chat = new Palpation(patientRole);
     }
@@ -431,7 +438,7 @@ public class HoloLensClient : MonoBehaviour
             string text = "FORCE PRESS DETECTED. [" + forcelevel.ToString() + "]";
             AddPalpation(user, text);
             UnityEngine.Debug.Log(text);
-            string patientResponse = await chat.ChatWithPatientAsync(text);
+            string patientResponse = await chat.ChatWithPatientAsync(chat.instruction, text);
 
             debugLog += "\n" + forcelevel.ToString() + patientResponse;
 
@@ -807,7 +814,7 @@ public class HoloLensClient : MonoBehaviour
                 UnityEngine.Debug.LogFormat($"RECOGNIZED: Text={text}, Language={fromLanguage}");
                 AddDialogue(user, text);
                 UnityEngine.Debug.Log("Human (Doctor): " + text);
-                string patientResponse = await chat.ChatWithPatientAsync(text);
+                string patientResponse = await chat.ChatWithPatientAsync(chat.instruction, text);
                 UnityEngine.Debug.Log(string.Join(", ", chat.History));
 
                 try
@@ -929,31 +936,27 @@ public class HoloLensClient : MonoBehaviour
     }
 
     public async Task checklistQuestioning(){
-        string instruction = "You are an evaluator. I will ask you some questions about the clinical interactions mentioned above. Please answer with 'yes' or 'no'.\n";
-        string[] Questions = new string[]
-        {
-            "Did the person introduce themselves as a doctor to the patient?",
-            "Did the person explain the examination procedure to the patient?",
-            "Did the person ask about the patient's symptoms?"
-        };
+        string instruction = "You are an evaluator. I will ask you some questions about the clinical interactions mentioned. Please answer with 'yes' or 'no' based on the dialogues.\n";
         
         foreach (string question in Questions){
             string answer = "";
-            UnityEngine.Debug.Log("Evaluator (GPT): " + question);
+            UnityEngine.Debug.Log("Evaluation Question: " + question);
             int retryCount = 0;
             while (retryCount < 5){    // Limit to 5 retries
                 try{
-                    string patientResponse = await chat.ChatWithPatientAsync(instruction + "Evaluator (GPT): " + question);
-                    UnityEngine.Debug.Log(string.Join(", ", chat.History));
+                    string patientResponse = await chat.ChatWithPatientAsync(instruction, "\nEvaluation Question: " + question);
+                    UnityEngine.Debug.Log(string.Join("", chat.History));
                     UnityEngine.Debug.Log(patientResponse);
                     patientResponse = patientResponse.ToLower(); 
                     answer = "";
                     if (patientResponse.Contains("yes")){
                         answer = " [yes]";
+                        questionResults.Add("yes");
                         break;
                     }
                     else if (patientResponse.Contains("no")){
                         answer = " [no]";
+                        questionResults.Add("no");
                         break;
                     }
                     retryCount++;
@@ -965,6 +968,7 @@ public class HoloLensClient : MonoBehaviour
                     if (retryCount >= 5)
                     {
                         answer = " [error]";
+                        questionResults.Add("error");
                         break;
                     }
                 }
@@ -1029,12 +1033,26 @@ public class Palpation
 {
 #region Palpation Variable
     private readonly string url = "http://43.163.219.59:8001/beta";
-    private readonly string gptModel = "gpt-3.5-turbo";
-    private string StartSequence = "\nAI (as Patient):";
-    private string RestartSequence = "\nHuman (as Doctor):";
+    private readonly string gptModel = "gpt-4o-mini";         //"gpt-3.5-turbo";  
+    private string StartSequence = "\nPatient: ";
+    private string RestartSequence = "\nDoctor: ";
     private string InitialPrompt;
+    public string instruction;
+    private string conversationStyle;
+    private string agent_name = "the patient";
     public System.Collections.Generic.List<string> History;
     private readonly HttpClient Client = new HttpClient();
+    public static System.Random random = new System.Random();
+
+
+    private string[] conversation_styles = new string[]{
+        "Plain: Direct, straightforward.",
+        "Upset: An upset patient may 1) exhibit anger or resistance towards the therapist or the therapeutic process, 2) may be challenging or dismissive of the therapist's suggestions and interventions, 3) have difficulty trusting the therapist and forming a therapeutic alliance, and 4) be prone to arguing, criticizing, or expressing frustration during therapy sessions.",
+        "Verbose: A verbose patient may 1) provide detailed responses to questions, even if directly relevant, 2) elaborate on personal experiences, thoughts, and feelings extensively, and 3) demonstrate difficulty in allowing the therapist to guide the conversation.",
+        "Reserved: A reserved patient may 1) provide brief, vague, or evasive answers to questions, 2) demonstrate reluctance to share personal information or feelings, 3) require more prompting and encouragement to open up, and 4) express distrust or skepticism towards the therapist.",
+        "Tangent: A patient who goes off on tangent may 1) start answering a question but quickly veer off into unrelated topics, 2) share personal anecdotes or experiences that are not relevant to the question asked, 3) demonstrate difficulty staying focused on the topic at hand, and 4) require redirection to bring the conversation back to the relevant points.",
+        "Pleasing: A pleasing patient may 1) minimize or downplay your own concerns or symptoms to maintain a positive image, 2) demonstrate eager-to-please behavior and avoid expressing disagreement or dissatisfaction, 3) seek approval or validation from the therapist frequently, and 4) agree with the therapist’s statements or suggestions readily, even if they may not fully understand or agree." 
+    };
 
     [Serializable]
     public class Data
@@ -1086,21 +1104,36 @@ public class Palpation
     {
         // // 使用 JSON 序列化来格式化角色设置
         // string formattedRoleSettings = JsonUtility.ToJson(roleSettings, true);
-        InitialPrompt = $@"
-            You are a patient to the hospital for a palpation medical check up. 
-            Please answer in an easy and short way when talking to the doctor. Don't talk too polite and formal.
-            Talk based on the 'Character Traits' listed in above. Reply according to the language that the person talked to you. 
-            You need to have emotion and personality and talk like a real human, e.g., Feel shock and worried when you are told having certain disease.
-            (And also other appropriate emotion such as sad, happy, angry etc.)
-            YOU SHOULD TALK ONLY AS A PATIENT, and tell your name correctly.
-            You should talk in {HoloLensClient.fromLanguage}.
-            Below is your personal detail:
-            {roleSettings}
+        conversationStyle = conversation_styles[random.Next(conversation_styles.Length)];
+        // InitialPrompt = $@"
+        //     You are a patient to the hospital for a palpation medical check up. 
+        //     Please answer in an easy and short way when talking to the doctor. Don't talk too polite and formal.
+        //     Talk based on the 'Character Traits' listed in above. Reply according to the language that the person talked to you. 
+        //     You need to have emotion and personality and talk like a real human, e.g., Feel shock and worried when you are told having certain disease.
+        //     (And also other appropriate emotion such as sad, happy, angry etc.)
+        //     YOU SHOULD TALK ONLY AS A PATIENT, and tell your name correctly.
+        //     You should talk in {HoloLensClient.fromLanguage}.
+        //     Below is your personal detail:
+        //     {roleSettings}
+        // ";
+        instruction = $@"Imagine you are a patient who has been experiencing body health challenges. Your task is to engage in a conversation with the doctor as {agent_name} would during an outpatient session. Align your responses with {agent_name}'s background information provided in the 'Patient Profile' section.
+
+        Patient Profile: {roleSettings}
+
+        In the upcoming conversation, you will simulate {agent_name} during the outpatient session, while the user will play the role of the doctor. Adhere to the following guidelines:
+        1. Conversational Style: {conversationStyle}
+        2. Emulate the demeanor and responses of a genuine patient to ensure authenticity in your interactions. Use natural language, including hesitations, pauses, and emotional expressions, to enhance the realism of your responses. 
+        3. Gradually reveal deeper concerns and core issues, as a real patient often requires extensive dialogue before delving into more sensitive topics. This gradual revelation creates challenges for doctors in identifying the patient's true thoughts and emotions. 
+        4. Maintain consistency with {agent_name}'s profile throughout the conversation. Ensure that your responses align with the provided background information. 
+        5. Engage in a dynamic and interactive conversation with the doctor. Respond to their questions and prompts in a way that feels authentic and true to {agent_name}'s character. Allow the conversation to flow naturally, and avoid providing abrupt or disconnected responses. 
+
+        You are now {agent_name}. Respond to the doctor's prompts as {agent_name} would, regardless of the specific questions asked. Limit each of your responses to a maximum of 3 sentences.
         ";
-        History = new System.Collections.Generic.List<string> { InitialPrompt };
+
+        History = new System.Collections.Generic.List<string> { instruction };
     }
 
-    public async Task<string> ChatWithPatientAsync(string message)
+    public async Task<string> ChatWithPatientAsync(string instruction, string message)
     {
         string prompt = "";
         if (message == "FORCE PRESS DETECTED. [large]")
@@ -1124,7 +1157,7 @@ public class Palpation
             //return "";
             prompt = string.Join("", History) + StartSequence;
         }
-        else if (message.Contains("Evaluator (GPT)")){ 
+        else if (message.Contains("Evaluation Question")){ 
             History.Add(message);
             prompt = string.Join("", History);
         }
@@ -1133,10 +1166,17 @@ public class Palpation
             History.Add(RestartSequence + message);
             prompt = string.Join("", History) + StartSequence;
         }
+        
+        List<Message> messages = new List<Message>();
+        if (!string.IsNullOrEmpty(instruction)){
+            messages.Add(new Message{role = "system", content = instruction});
+        }
+        messages.Add(new Message{role = "user", content = prompt});
+    
         var data = new Data
         {
             model = gptModel,
-            messages = new[] { new Message { role = "user", content = prompt } },
+            messages = messages.ToArray(), 
             max_tokens = 1024
         };
         string jsonData = JsonUtility.ToJson(data);
@@ -1154,8 +1194,8 @@ public class Palpation
             if (responseJson != null && responseJson.choices != null && responseJson.choices.Length > 0)
             {
                 string patientResponse = responseJson.choices[0].message.content;
-                if (message.Contains("Evaluator (GPT)")){ 
-                    History.Add("Evaluator (GPT)" + patientResponse);
+                if (message.Contains("Evaluation Question")){ 
+                    History.Add("\nEvaluator (GPT): " + patientResponse);
                 }
                 else{
                     History.Add(StartSequence + message);
@@ -1177,7 +1217,7 @@ public class Palpation
 public class PatientRoleGenerator
 {
 #region Patient Variable
-    private readonly string gptModel = "gpt-3.5-turbo";
+    private readonly string gptModel = "gpt-4o";   // "gpt-3.5-turbo";
     private readonly HttpClient Client = new HttpClient();
     private readonly string url = "http://43.163.219.59:8001/beta";
     [Serializable]
@@ -1209,39 +1249,38 @@ public class PatientRoleGenerator
 
     private string basePrompt = @"
         Generate a detailed role setting for a patient with hepatomegaly. The sample format is as below. 
-        Change all the settings below and generate a new role. The patient MUST feel pain in the right upper abdomen.
-        The gender of the patient must be Male.
+        Change all the settings below and generate a new role. Generate the patient's name from any country of the world. 
+        The patient must feel pain in the right upper abdomen. The gender of the patient must be Male. Return in JSON format.
         role_settings = {
-            ""Role Overview"": {
+            ""role_overview"": {
                 ""Name"": ""Li Ming"",
                 ""Age"": ""52"",
                 ""Gender"": ""Male"",
                 ""Occupation"": ""Senior Engineer"",
                 ""Residence"": ""Urban areas, with a fast pace of life""
             },
-            ""Character traits"": {
-                ""Communication style"": ""gentle and detailed, willing to share their symptoms and lifestyle habits"",
+            ""character_traits"": {
                 ""Response mode"": ""sensitive to pain, able to respond realistically to different palpation pressures"",
                 ""Emotional state"": ""usually remains calm, but may appear anxious or worried when expressing symptoms""
             },
-            ""Visible or Palpable Physical Conditions"": {
+            ""visible_or_palpable_physical_conditions"": {
                 ""Abdominal swelling"": ""Noticeable bulge in the upper right abdomen, visible when wearing tight clothing"",
                 ""Location of pain"": ""Right upper abdomen"",
                 ""Skin changes"": ""Yellowing of the skin and sclera, signifying jaundice; possibly spider angiomas on the skin due to liver disease"",
                 ""Other physical signs"": ""Mild peripheral edema in lower extremities, especially noticeable in the ankles by end of day"",
                 ""Sensitivity to pain"": ""Sensitive to pain but can realistically respond to varying pressures during palpation"",
             },
-            ""Health and Medical Background"": {
+            ""health_and_medical_background"": {
                 ""Causes of hepatomegaly"": ""chronic alcoholic liver disease"",
                 ""Symptoms"": ""Initial stage: no obvious symptoms, occasional fatigue and indigestion; progressive stage: pain in the upper right abdomen, weight loss, loss of appetite; recently: significant liver swelling, yellowing of the skin and whites of the eyes (jaundice)"",
                 ""Other health problems"": ""High blood pressure, taking blood pressure medication; Mild obesity""
             },
-            ""Historical Cases"": {
+            ""historical_cases"": {
                 ""Diagnosis time of liver enlargement"": ""1 year ago"",
                 ""Previous medical history"": ""non-alcoholic fatty liver disease (NAFLD), diagnosed 5 years ago; type 2 diabetes, diagnosed 3 years ago; hypertension, diagnosed with diabetes"",
                 ""Family medical history"": ""Father has a history of hypertension and coronary heart disease""
             },
-            ""Personal lifestyle"": {
+            ""personal_lifestyle"": {
                 ""Habits"": ""Long-term drinking, high work pressure, especially frequent social occasions, preference for high-fat and high-salt foods"",
                 ""Exercise habits"": ""Due to busy work, Li Ming rarely has time for physical exercise"",
                 ""Family status"": ""Married with two children, good family relationships but often lack family time due to busy work""
@@ -1259,6 +1298,7 @@ public class PatientRoleGenerator
 
     public async Task<string> GenerateRoleSettingAsync()
     {
+        UnityEngine.Debug.Log("GENERATE ROLE");
         var data = new Data
         {
             model = gptModel,
@@ -1280,6 +1320,7 @@ public class PatientRoleGenerator
             if (responseJson != null && responseJson.choices != null && responseJson.choices.Length > 0)
             {
                 string patientResponse = responseJson.choices[0].message.content;
+                UnityEngine.Debug.Log(patientResponse);
                 return patientResponse;
             }
             else
@@ -1293,6 +1334,5 @@ public class PatientRoleGenerator
         }
     }
 }
-
 
 

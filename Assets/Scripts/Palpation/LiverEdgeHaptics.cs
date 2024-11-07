@@ -36,6 +36,8 @@ public class LiverEdgeHaptics : MonoBehaviour
     [SerializeField] private TMP_Text upperThreshold_Text;
     [SerializeField] private TMP_Text breathRate_Text;
 
+    public bool liverEdgeFelt = false;
+
     public enum PressingState
     {
         None,
@@ -294,6 +296,8 @@ public class LiverEdgeHaptics : MonoBehaviour
 
             if (beatOn)
             {
+                liverEdgeFelt = true;
+
                 if (showVisualCue)
                 {
                     liver.SetActive(true);
